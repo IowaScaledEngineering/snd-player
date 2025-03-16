@@ -19,9 +19,6 @@
 #define AUDIO_BUFFER_SIZE   512
 #define AUDIO_BUFFER_NUM      4
 
-// Bytes
-#define FILE_BUFFER_SIZE 2048
-
 // Pins
 #define EN1         9
 #define EN2        10
@@ -35,7 +32,7 @@
 #define AUX2       16
 #define AUX3       17
 #define AUX4       18
-#define AUX5       	8
+#define AUX5        8
 #define I2S_SD      4
 #define I2S_DATA    5
 #define I2S_BCLK    6
@@ -47,16 +44,16 @@
 #define SDDET      33
 
 // Bit positions for inputs
-#define VOL_UP_BUTTON 0x01
-#define VOL_DN_BUTTON 0x02
-#define EN1_INPUT						0x10
-#define EN2_INPUT						0x20
-#define EN3_INPUT						0x40
-#define EN4_INPUT						0x80
+#define VOL_UP_BUTTON   0x01
+#define VOL_DN_BUTTON   0x02
+#define EN1_INPUT       0x10
+#define EN2_INPUT       0x20
+#define EN3_INPUT       0x40
+#define EN4_INPUT       0x80
 
 // Volume
-#define VOL_STEP_MAX		30
-#define VOL_STEP_NOM		20
+#define VOL_STEP_MAX   30
+#define VOL_STEP_NOM   20
 
 uint8_t volumeStep = 0;
 uint16_t volume = 0;
@@ -64,7 +61,7 @@ uint8_t volumeUpCoef = 0;
 uint8_t volumeDownCoef = 0;
 
 uint16_t volumeLevels[] = {
-		0,					// 0
+		0,      // 0
 		100,
 		200,
 		300,
@@ -74,7 +71,7 @@ uint16_t volumeLevels[] = {
 		700,
 		800,
 		900,
-		1000,				// 10
+		1000,   // 10
 		1900,
 		2800,
 		3700,
@@ -84,7 +81,7 @@ uint16_t volumeLevels[] = {
 		7300,
 		8200,
 		9100,
-		10000,	// 20
+		10000,  // 20
 		11000,
 		12000,
 		13000,
@@ -94,12 +91,12 @@ uint16_t volumeLevels[] = {
 		17000,
 		18000,
 		19000,
-		20000,	// 30
+		20000,  // 30
 };
 
 bool restart = false;
 
-uint8_t enable = 0;  // 0 or 1
+bool unmute = false;
 uint8_t silenceDecisecsMax = 0;
 uint8_t silenceDecisecsMin = 0;
 
@@ -190,211 +187,11 @@ bool configKeyValueSplit(char* key, uint32_t keySz, char* value, uint32_t valueS
 }
 
 hw_timer_t * timer = NULL;
+volatile bool timerTick = false;
 
 void IRAM_ATTR processVolume(void)
 {
-	static uint8_t buttonsPressed = 0, oldButtonsPressed = 0;
-	static unsigned long pressTime = 0;
-	uint8_t inputStatus = 0;
-
-//	digitalWrite(AUX5, 1);
-
-	// Turn off LED
-	uint16_t ledHoldTime = (VOL_STEP_NOM == volumeStep) ? 1000 : 100;
-	if((millis() - pressTime) > ledHoldTime)
-	{
-		digitalWrite(LEDB, 0);
-	}
-
-	// Read inputs
-	if(digitalRead(VOLUP))
-		inputStatus &= ~VOL_UP_BUTTON;
-	else
-		inputStatus |= VOL_UP_BUTTON;
-
-	if(digitalRead(VOLDN))
-		inputStatus &= ~VOL_DN_BUTTON;
-	else
-		inputStatus |= VOL_DN_BUTTON;
-
-	if(digitalRead(EN1))
-		inputStatus &= ~EN1_INPUT;
-	else
-		inputStatus |= EN1_INPUT;
-
-	if(digitalRead(EN2))
-		inputStatus &= ~EN2_INPUT;
-	else
-		inputStatus |= EN2_INPUT;
-
-	if(digitalRead(EN3))
-		inputStatus &= ~EN3_INPUT;
-	else
-		inputStatus |= EN3_INPUT;
-
-	if(digitalRead(EN4))
-		inputStatus &= ~EN4_INPUT;
-	else
-		inputStatus |= EN4_INPUT;
-
-	// Debounce
-	buttonsPressed = debounce(buttonsPressed, inputStatus);
-
-	// Find rising edge of volume up button
-	if((buttonsPressed ^ oldButtonsPressed) & (buttonsPressed & VOL_UP_BUTTON))
-	{
-		pressTime = millis();
-		if(volumeStep < VOL_STEP_MAX)
-		{
-			volumeStep++;
-			preferences.putUChar("volume", volumeStep);
-		}
-		Serial.print("Vol Up: ");
-		Serial.println(volumeStep);
-		digitalWrite(LEDB, 1);
-	}
-
-	// Find rising edge of volume down button
-	if((buttonsPressed ^ oldButtonsPressed) & (buttonsPressed & VOL_DN_BUTTON))
-	{
-		pressTime = millis();
-		if(volumeStep > 0)
-		{
-			volumeStep--;
-			preferences.putUChar("volume", volumeStep);
-		}
-		Serial.print("Vol Dn: ");
-		Serial.println(volumeStep);
-		digitalWrite(LEDB, 1);
-	}
-
-	// Check for serial input
-	if(Serial.available() > 0)
-	{
-		uint8_t serialChar = Serial.read();
-		switch(serialChar)
-		{
-			case 'a':
-				if(silenceDecisecsMax < 255)
-				{
-					silenceDecisecsMax++;
-					preferences.putUChar("silenceMax", silenceDecisecsMax);
-				}
-				Serial.print("Silence Max: ");
-				Serial.print(silenceDecisecsMax/10.0, 1);
-				Serial.println("s");
-				break;
-			case 'z':
-				if(silenceDecisecsMax > silenceDecisecsMin)
-				{
-					silenceDecisecsMax--;
-					preferences.putUChar("silenceMax", silenceDecisecsMax);
-				}
-				Serial.print("Silence Max: ");
-				Serial.print(silenceDecisecsMax/10.0, 1);
-				Serial.println("s");
-				break;
-
-			case 's':
-				if(silenceDecisecsMin < silenceDecisecsMax)
-				{
-					silenceDecisecsMin++;
-					preferences.putUChar("silenceMin", silenceDecisecsMin);
-				}
-				Serial.print("Silence Min: ");
-				Serial.print(silenceDecisecsMin/10.0, 1);
-				Serial.println("s");
-				break;
-			case 'x':
-				if(silenceDecisecsMin > 0)
-				{
-					silenceDecisecsMin--;
-					preferences.putUChar("silenceMin", silenceDecisecsMin);
-				}
-				Serial.print("Silence Min: ");
-				Serial.print(silenceDecisecsMin/10.0, 1);
-				Serial.println("s");
-				break;
-
-			case 'd':
-				if(volumeUpCoef < 255)
-				{
-					volumeUpCoef++;
-					preferences.putUChar("volumeUp", volumeUpCoef);
-				}
-				Serial.print("Volume Up Coef: ");
-				Serial.println(volumeUpCoef);
-				break;
-			case 'c':
-				if(volumeUpCoef > 1)
-				{
-					volumeUpCoef--;
-					preferences.putUChar("volumeUp", volumeUpCoef);
-				}
-				Serial.print("Volume Up Coef: ");
-				Serial.println(volumeUpCoef);
-				break;
-
-			case 'f':
-				if(volumeDownCoef < 255)
-				{
-					volumeDownCoef++;
-					preferences.putUChar("volumeDown", volumeDownCoef);
-				}
-				Serial.print("Volume Down Coef: ");
-				Serial.println(volumeDownCoef);
-				break;
-			case 'v':
-				if(volumeDownCoef > 1)
-				{
-					volumeDownCoef--;
-					preferences.putUChar("volumeDown", volumeDownCoef);
-				}
-				Serial.print("Volume Down Coef: ");
-				Serial.println(volumeDownCoef);
-				break;
-
-			case 'q':
-				restart = true;
-				break;
-		}
-	}
-
-	enable = (buttonsPressed & (EN1_INPUT | EN2_INPUT | EN3_INPUT | EN4_INPUT)) ? 1 : 0;
-
-	if(enable)
-	{
-		digitalWrite(LEDA, 1);
-	}
-	else
-	{
-		digitalWrite(LEDA, 0);
-	}
-
-	// Process volume
-	uint16_t deltaVolume;
-	uint16_t volumeTarget;
-	volumeTarget = volumeLevels[volumeStep] * enable;
-
-	if(volume < volumeTarget)
-	{
-		deltaVolume = (volumeTarget - volume);
-		if((deltaVolume > 0) && (deltaVolume < volumeUpCoef))
-			deltaVolume = volumeUpCoef;  // Make sure it goes all the way to min or max
-		volume += deltaVolume  / volumeUpCoef;
-//		Serial.println(volume);
-	}
-	else if(volume > volumeTarget)
-	{
-		deltaVolume = (volume - volumeTarget);
-		if((deltaVolume > 0) && (deltaVolume < volumeDownCoef))
-			deltaVolume = volumeDownCoef;  // Make sure it goes all the way to min or max
-		volume -= deltaVolume / volumeDownCoef;
-//		Serial.println(volume);
-	}
-
-	oldButtonsPressed = buttonsPressed;
-//	digitalWrite(AUX5, 0);
+	timerTick = true;
 }
 
 void setup()
@@ -447,8 +244,8 @@ void playerInit(void)
 
 void play(i2s_port_t i2s_num)
 {
-	size_t bytesRead;
-	uint8_t fileBuffer[FILE_BUFFER_SIZE];
+//	size_t bytesRead;
+//	uint8_t fileBuffer[FILE_BUFFER_SIZE];
 	int16_t sampleValue;
 	uint32_t outputValue;
 	size_t bytesWritten;
@@ -470,22 +267,21 @@ void play(i2s_port_t i2s_num)
 			if(wavSound->available())
 			{
 				esp_task_wdt_reset();
-				bytesRead = wavSound->read(fileBuffer, 2);
-				if(2 == bytesRead)
-				{
-					// File is read on a byte basis, so convert into int16 samples
-					sampleValue = *((int16_t *)(fileBuffer));
-					int32_t adjustedValue = sampleValue * volume / volumeLevels[VOL_STEP_NOM];
-					if(adjustedValue > 32767)
-						sampleValue = 32767;
-					else if(adjustedValue < -32768)
-						sampleValue = -32768;
-					else
-						sampleValue = adjustedValue;
-					// Combine into 32 bit word (left & right)
-					outputValue = (sampleValue<<16) | (sampleValue & 0xffff);
-					i2s_write(i2s_num, &outputValue, 4, &bytesWritten, portMAX_DELAY);
-				}
+digitalWrite(AUX2, 1);
+				sampleValue = wavSound->getNextSample();
+digitalWrite(AUX2, 0);
+				int32_t adjustedValue = sampleValue * volume / volumeLevels[VOL_STEP_NOM];
+				if(adjustedValue > 32767)
+					sampleValue = 32767;
+				else if(adjustedValue < -32768)
+					sampleValue = -32768;
+				else
+					sampleValue = adjustedValue;
+				// Combine into 32 bit word (left & right)
+				outputValue = (sampleValue<<16) | (sampleValue & 0xffff);
+digitalWrite(AUX3, 1);
+				i2s_write(i2s_num, &outputValue, 4, &bytesWritten, portMAX_DELAY);
+digitalWrite(AUX3, 0);
 			}
 			else
 			{
@@ -507,7 +303,11 @@ void loop()
 	uint32_t sampleRate = 0;
 	uint16_t bitsPerSample = 0;
 	uint32_t wavDataSize = 0;
-	static uint8_t lastSampleNum = 255;
+	uint8_t lastSampleNum = 255;
+
+	uint8_t buttonsPressed = 0, oldButtonsPressed = 0;
+	unsigned long pressTime = 0;
+	uint8_t inputStatus = 0;
 
 	std::vector<Sound *> squealSounds;
 	wavSoundNext = NULL;
@@ -734,8 +534,7 @@ void loop()
 	i2s_port_t i2s_num = I2S_NUM_0;
 	i2s_config_t i2s_config = {
 			.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
-//			.sample_rate = wavSound->getSampleRate(),
-			.sample_rate = 16000,
+			.sample_rate = 44100,
 			.bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
 			.channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
 			.communication_format = (i2s_comm_format_t)I2S_COMM_FORMAT_STAND_I2S,
@@ -766,6 +565,217 @@ void loop()
 	{
 		esp_task_wdt_reset();
 
+		// Read inputs
+		if(digitalRead(VOLUP))
+			inputStatus &= ~VOL_UP_BUTTON;
+		else
+			inputStatus |= VOL_UP_BUTTON;
+
+		if(digitalRead(VOLDN))
+			inputStatus &= ~VOL_DN_BUTTON;
+		else
+			inputStatus |= VOL_DN_BUTTON;
+
+		if(digitalRead(EN1))
+			inputStatus &= ~EN1_INPUT;
+		else
+			inputStatus |= EN1_INPUT;
+
+		if(digitalRead(EN2))
+			inputStatus &= ~EN2_INPUT;
+		else
+			inputStatus |= EN2_INPUT;
+
+		if(digitalRead(EN3))
+			inputStatus &= ~EN3_INPUT;
+		else
+			inputStatus |= EN3_INPUT;
+
+		if(digitalRead(EN4))
+			inputStatus &= ~EN4_INPUT;
+		else
+			inputStatus |= EN4_INPUT;
+
+		// Do things on 10ms interval
+		if(timerTick)
+		{
+			timerTick = false;
+
+			// Debounce
+			buttonsPressed = debounce(buttonsPressed, inputStatus);
+
+			// Process volume
+			uint16_t deltaVolume;
+			uint16_t volumeTarget;
+			volumeTarget = volumeLevels[volumeStep] * unmute;
+
+			if(volume < volumeTarget)
+			{
+				deltaVolume = (volumeTarget - volume);
+				if((deltaVolume > 0) && (deltaVolume < volumeUpCoef))
+					deltaVolume = volumeUpCoef;  // Make sure it goes all the way to min or max
+				volume += deltaVolume / volumeUpCoef;
+			}
+			else if(volume > volumeTarget)
+			{
+				deltaVolume = (volume - volumeTarget);
+				if((deltaVolume > 0) && (deltaVolume < volumeDownCoef))
+					deltaVolume = volumeDownCoef;  // Make sure it goes all the way to min or max
+				volume -= deltaVolume / volumeDownCoef;
+			}
+		}
+
+		// Turn off volume LED
+		uint16_t ledHoldTime = (VOL_STEP_NOM == volumeStep) ? 1000 : 100;
+		if((millis() - pressTime) > ledHoldTime)
+		{
+			digitalWrite(LEDB, 0);
+		}
+
+		// Find rising edge of volume up button
+		if((buttonsPressed ^ oldButtonsPressed) & (buttonsPressed & VOL_UP_BUTTON))
+		{
+			pressTime = millis();
+			if(volumeStep < VOL_STEP_MAX)
+			{
+				volumeStep++;
+				preferences.putUChar("volume", volumeStep);
+			}
+			Serial.print("Vol Up: ");
+			Serial.println(volumeStep);
+			digitalWrite(LEDB, 1);
+		}
+
+		// Find rising edge of volume down button
+		if((buttonsPressed ^ oldButtonsPressed) & (buttonsPressed & VOL_DN_BUTTON))
+		{
+			pressTime = millis();
+			if(volumeStep > 0)
+			{
+				volumeStep--;
+				preferences.putUChar("volume", volumeStep);
+			}
+			Serial.print("Vol Dn: ");
+			Serial.println(volumeStep);
+			digitalWrite(LEDB, 1);
+		}
+
+		oldButtonsPressed = buttonsPressed;
+
+		// Check for serial input
+		if(Serial.available() > 0)
+		{
+			uint8_t serialChar = Serial.read();
+			switch(serialChar)
+			{
+				case 'a':
+					if(silenceDecisecsMax < 255)
+					{
+						silenceDecisecsMax++;
+						preferences.putUChar("silenceMax", silenceDecisecsMax);
+					}
+					Serial.print("Silence Max: ");
+					Serial.print(silenceDecisecsMax/10.0, 1);
+					Serial.println("s");
+					break;
+				case 'z':
+					if(silenceDecisecsMax > silenceDecisecsMin)
+					{
+						silenceDecisecsMax--;
+						preferences.putUChar("silenceMax", silenceDecisecsMax);
+					}
+					Serial.print("Silence Max: ");
+					Serial.print(silenceDecisecsMax/10.0, 1);
+					Serial.println("s");
+					break;
+
+				case 's':
+					if(silenceDecisecsMin < silenceDecisecsMax)
+					{
+						silenceDecisecsMin++;
+						preferences.putUChar("silenceMin", silenceDecisecsMin);
+					}
+					Serial.print("Silence Min: ");
+					Serial.print(silenceDecisecsMin/10.0, 1);
+					Serial.println("s");
+					break;
+				case 'x':
+					if(silenceDecisecsMin > 0)
+					{
+						silenceDecisecsMin--;
+						preferences.putUChar("silenceMin", silenceDecisecsMin);
+					}
+					Serial.print("Silence Min: ");
+					Serial.print(silenceDecisecsMin/10.0, 1);
+					Serial.println("s");
+					break;
+
+				case 'd':
+					if(volumeUpCoef < 255)
+					{
+						volumeUpCoef++;
+						preferences.putUChar("volumeUp", volumeUpCoef);
+					}
+					Serial.print("Volume Up Coef: ");
+					Serial.println(volumeUpCoef);
+					break;
+				case 'c':
+					if(volumeUpCoef > 1)
+					{
+						volumeUpCoef--;
+						preferences.putUChar("volumeUp", volumeUpCoef);
+					}
+					Serial.print("Volume Up Coef: ");
+					Serial.println(volumeUpCoef);
+					break;
+
+				case 'f':
+					if(volumeDownCoef < 255)
+					{
+						volumeDownCoef++;
+						preferences.putUChar("volumeDown", volumeDownCoef);
+					}
+					Serial.print("Volume Down Coef: ");
+					Serial.println(volumeDownCoef);
+					break;
+				case 'v':
+					if(volumeDownCoef > 1)
+					{
+						volumeDownCoef--;
+						preferences.putUChar("volumeDown", volumeDownCoef);
+					}
+					Serial.print("Volume Down Coef: ");
+					Serial.println(volumeDownCoef);
+					break;
+
+				case 'q':
+					restart = true;
+					break;
+			}
+		}
+
+		// Figure out if any enable inputs are pressed and light LED
+		bool enable = (buttonsPressed & (EN1_INPUT | EN2_INPUT | EN3_INPUT | EN4_INPUT)) ? true : false;
+
+		if(enable)
+		{
+			digitalWrite(LEDA, 1);
+		}
+		else
+		{
+			digitalWrite(LEDA, 0);
+		}
+
+
+		// FIXME: Temporary code to unmute when any input enabled
+		if(enable)
+			unmute = true;
+		else
+			unmute = false;
+
+
+
+
 		if(NULL == wavSoundNext)
 		{
 			Serial.print("Heap free: ");
@@ -791,9 +801,13 @@ void loop()
 			wavSoundNext = squealSounds[sampleNum];
 			lastSampleNum = sampleNum;
 		}
-				
-		esp_task_wdt_reset();
+
+
+digitalWrite(AUX1, 1);
+		// Pump the sound player
 		play(i2s_num);
+digitalWrite(AUX1, 0);
+
 
 		if(restart)
 		{
