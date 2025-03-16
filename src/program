@@ -1,0 +1,30 @@
+#!/bin/bash
+
+if [ $# -eq 0 ]
+  then
+    port=/dev/ttyACM0
+  else
+    port=$1
+fi
+
+while true
+do
+	touch $port > /dev/null 2> /dev/null
+	while [ $? -ne 0 ]
+	do
+		echo -n .
+		sleep 1
+		touch $port > /dev/null 2> /dev/null
+	done
+
+	echo -e "\n\033[1;33mProgramming\033[0m\n"
+	espeak "Programming"
+
+	make firmware BIN=build-1.0.0 PORT=$port
+
+	echo -e "\033[0;32mComplete\033[0m\n"
+	espeak "Complete"
+
+	sleep 1
+	make terminal PORT=$port
+done
