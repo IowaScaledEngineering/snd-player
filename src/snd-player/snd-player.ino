@@ -231,8 +231,9 @@ void setup()
 
 typedef enum
 {
-				PLAYER_IDLE,
-				PLAYER_PLAY,
+	PLAYER_IDLE,
+	PLAYER_PLAY,
+	PLAYER_RETRY,
 } PlayerState;
 
 PlayerState playerState;
@@ -244,10 +245,8 @@ void playerInit(void)
 
 void play(i2s_port_t i2s_num)
 {
-//	size_t bytesRead;
-//	uint8_t fileBuffer[FILE_BUFFER_SIZE];
 	int16_t sampleValue;
-	uint32_t outputValue;
+	static uint32_t outputValue;  // Static so the value persists between _PLAY and _RETRY states
 	size_t bytesWritten;
 
 	esp_task_wdt_reset();
@@ -280,7 +279,9 @@ digitalWrite(AUX2, 0);
 				// Combine into 32 bit word (left & right)
 				outputValue = (sampleValue<<16) | (sampleValue & 0xffff);
 digitalWrite(AUX3, 1);
-				i2s_write(i2s_num, &outputValue, 4, &bytesWritten, portMAX_DELAY);
+				i2s_write(i2s_num, &outputValue, 4, &bytesWritten, 1);
+				if(0 == bytesWritten)
+					playerState = PLAYER_RETRY;
 digitalWrite(AUX3, 0);
 			}
 			else
@@ -288,6 +289,15 @@ digitalWrite(AUX3, 0);
 				wavSound->close();
 				playerState = PLAYER_IDLE;
 			}
+			break;
+		case PLAYER_RETRY:
+digitalWrite(AUX4, 1);
+			i2s_write(i2s_num, &outputValue, 4, &bytesWritten, 1);
+			if(0 == bytesWritten)
+				playerState = PLAYER_RETRY;
+			else
+				playerState = PLAYER_PLAY;
+digitalWrite(AUX4, 0);
 			break;
 	}
 }
@@ -535,6 +545,7 @@ void loop()
 	i2s_config_t i2s_config = {
 			.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
 			.sample_rate = 44100,
+//			.sample_rate = 8000,
 			.bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
 			.channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
 			.communication_format = (i2s_comm_format_t)I2S_COMM_FORMAT_STAND_I2S,
