@@ -1,3 +1,24 @@
+/*************************************************************************
+Title:    Sound Player
+Authors:  Michael Petersen <railfan@drgw.net>
+File:     snd-player.ino
+License:  GNU General Public License v3
+
+LICENSE:
+    Copyright (C) 2024 Michael Petersen
+
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+*************************************************************************/
+
 #include <SPI.h>
 #include <SD.h>
 #include "driver/i2s.h"
@@ -234,6 +255,7 @@ typedef enum
 	PLAYER_IDLE,
 	PLAYER_PLAY,
 	PLAYER_RETRY,
+	PLAYER_FLUSH,
 } PlayerState;
 
 PlayerState playerState;
@@ -245,6 +267,7 @@ void playerInit(void)
 
 void play(i2s_port_t i2s_num)
 {
+	size_t i;
 	int16_t sampleValue;
 	static uint32_t outputValue;  // Static so the value persists between _PLAY and _RETRY states
 	size_t bytesWritten;
@@ -287,7 +310,16 @@ digitalWrite(AUX3, 0);
 			else
 			{
 				wavSound->close();
-				playerState = PLAYER_IDLE;
+				if(NULL == wavSoundNext)
+				{
+					// No file queued, so flush
+					playerState = PLAYER_FLUSH;
+				}
+				else
+				{
+					// Another file is already queued, start playing immediately so it's seamless
+					playerState = PLAYER_IDLE;
+				}
 			}
 			break;
 		case PLAYER_RETRY:
@@ -298,6 +330,15 @@ digitalWrite(AUX4, 1);
 			else
 				playerState = PLAYER_PLAY;
 digitalWrite(AUX4, 0);
+			break;
+		case PLAYER_FLUSH:
+			// Make sure current buffer is full to flush any partial data in it to the I2S engine
+			outputValue = 0;
+			for(i=0; i<AUDIO_BUFFER_SIZE; i++)
+			{
+				i2s_write(i2s_num, &outputValue, 4, &bytesWritten, 1);
+				// If it times out, then the buffer is full
+			}
 			break;
 	}
 }

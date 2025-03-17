@@ -11,7 +11,6 @@ BASE_NAME = snd-player
 GITREV := $(shell git rev-parse --short=6 HEAD)
 REV    := $(shell ./git-revision.sh)
 
-GITREV = 000000
 REV    = 0.0.0
 
 BOARD     = esp32:esp32:esp32s2:CDCOnBoot=cdc,UploadMode=cdc,PSRAM=enabled
