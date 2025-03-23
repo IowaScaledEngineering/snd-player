@@ -126,9 +126,6 @@ uint8_t silenceDecisecsMin = 0;
 
 Preferences preferences;
 
-Sound *wavSoundNext;
-uint32_t dmaBufferSize;
-
 uint8_t debounce(uint8_t debouncedState, uint8_t newInputs)
 {
 	static uint8_t clock_A = 0, clock_B = 0;
@@ -273,8 +270,13 @@ typedef enum
 PlayerState playerState;
 bool stopPlayer;
 
-// FIXME: make part of queue structure
-bool seamlessPlay;
+struct WavSound {
+	Sound *wav;
+	bool seamlessPlay;
+};
+
+struct WavSound wavSoundNext;
+uint32_t dmaBufferSize;
 
 void playerInit(void)
 {
@@ -289,6 +291,7 @@ void play(i2s_chan_handle_t i2s_handle)
 	// Static so the value persists between calls to play()
 	static uint32_t outputValue;  // needs to persist for PLAYER_RETRY
 	static Sound *wavSound;
+	static bool seamlessPlay;
 	static uint32_t oldSampleRate;
 	static uint32_t flushCount;
 
@@ -297,7 +300,7 @@ void play(i2s_chan_handle_t i2s_handle)
 	switch(playerState)
 	{
 		case PLAYER_IDLE:
-			if(NULL != wavSoundNext)
+			if(NULL != wavSoundNext.wav)
 			{
 				// Queue not empty
 				playerState = PLAYER_INIT;
@@ -305,8 +308,9 @@ void play(i2s_chan_handle_t i2s_handle)
 			break;
 
 		case PLAYER_INIT:
-			wavSound = wavSoundNext;  // Read the queue
-			wavSoundNext = NULL;      // Clear the queue
+			wavSound = wavSoundNext.wav;  // Read the queue
+			seamlessPlay = wavSoundNext.seamlessPlay;
+			wavSoundNext.wav = NULL;  // Clear the queue
 			wavSound->open();         // Open the sound
 			if(wavSound->getSampleRate() == oldSampleRate)
 				playerState = PLAYER_PLAY;
@@ -357,7 +361,7 @@ digitalWrite(AUX3, 0);
 			{
 				// Sound done, no samples available
 				wavSound->close();
-				if((NULL != wavSoundNext) && (seamlessPlay))
+				if((NULL != wavSoundNext.wav) && (seamlessPlay))
 				{
 					// Queue not empty and seamless playing, so grab next
 					playerState = PLAYER_INIT;
@@ -397,7 +401,7 @@ digitalWrite(AUX4, 0);
 			}
 			if(flushCount >= dmaBufferSize)
 			{
-				if(NULL != wavSoundNext)
+				if(NULL != wavSoundNext.wav)
 				{
 					// Queue not empty
 					playerState = PLAYER_INIT;
@@ -438,7 +442,8 @@ void loop()
 	uint8_t inputStatus = 0;
 
 	std::vector<Sound *> squealSounds;
-	wavSoundNext = NULL;
+	wavSoundNext.wav = NULL;
+	wavSoundNext.seamlessPlay = false;
 
 	esp_task_wdt_reset();
 	
@@ -904,7 +909,7 @@ void loop()
 
 
 
-		if(NULL == wavSoundNext)
+		if(NULL == wavSoundNext.wav)
 		{
 			Serial.print("Heap free: ");
 			Serial.println(esp_get_free_heap_size());
@@ -926,7 +931,7 @@ void loop()
 			}
 			Serial.print("Queueing... ");
 			Serial.println(sampleNum);
-			wavSoundNext = squealSounds[sampleNum];
+			wavSoundNext.wav = squealSounds[sampleNum];
 			lastSampleNum = sampleNum;
 		}
 
