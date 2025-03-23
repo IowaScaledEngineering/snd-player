@@ -588,8 +588,8 @@ void loop()
 
 	timerAlarm(timer, 10000, true, 0);            // 1us * 10000 = 10ms, autoreload, unlimited reloads
 
-	// Default dma_frame_num = 240 (i2s_common.h)
-	//    Total DMA size = 240 * 2 * 16 / 8 = 960 bytes
+	// Default dma_frame_num = 240, dma_desc_num = 6 (i2s_common.h)
+	//    Total DMA size = 240 * 6 * 2 * 16 / 8 = 5760 bytes
 	i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
 	i2s_new_channel(&chan_cfg, &i2s_tx_handle, NULL);
 
@@ -612,6 +612,11 @@ void loop()
 
 	i2s_channel_init_std_mode(i2s_tx_handle, &std_cfg);
 	i2s_channel_enable(i2s_tx_handle);
+
+	i2s_chan_info_t chan_info;
+	i2s_channel_get_info(i2s_tx_handle, &chan_info);
+	Serial.print("DMA buffer size: ");
+	Serial.println(chan_info.total_dma_buf_size);
 
 	digitalWrite(I2S_SD, 1);	// Enable amplifier
 
