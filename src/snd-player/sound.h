@@ -28,7 +28,7 @@ class Sound
 	protected:
 		size_t dataSize;
 		size_t byteCount;
-		uint16_t sampleRate;
+		uint32_t sampleRate;
 
 	public:
 		virtual void open(void);
@@ -42,7 +42,7 @@ class Sound
 		virtual size_t read(uint8_t *buffer, size_t numBytes);
 		virtual int16_t getNextSample(void);
 		virtual void close(void);
-		uint16_t getSampleRate(void)
+		uint32_t getSampleRate(void)
 		{
 			return sampleRate;
 		}

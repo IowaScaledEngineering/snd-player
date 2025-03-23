@@ -127,7 +127,7 @@ uint8_t silenceDecisecsMin = 0;
 Preferences preferences;
 
 Sound *wavSoundNext;
-Sound *wavSound;
+uint32_t dmaBufferSize;
 
 uint8_t debounce(uint8_t debouncedState, uint8_t newInputs)
 {
@@ -213,7 +213,7 @@ bool configKeyValueSplit(char* key, uint32_t keySz, char* value, uint32_t valueS
 hw_timer_t * timer = NULL;
 volatile bool timerTick = false;
 
-void IRAM_ATTR processVolume(void)
+void IRAM_ATTR tickTimer(void)
 {
 	timerTick = true;
 }
@@ -254,30 +254,43 @@ void setup()
 	esp_task_wdt_reset();
 
 	timer = timerBegin(1000000);                  // 1MHz = 1us
-	timerAttachInterrupt(timer, &processVolume);
+	timerAttachInterrupt(timer, &tickTimer);
+	timerAlarm(timer, 10000, true, 0);            // 1us * 10000 = 10ms, autoreload, unlimited reloads
 }
 
 typedef enum
 {
 	PLAYER_IDLE,
+	PLAYER_INIT,
+	PLAYER_RECONFIGURE,
 	PLAYER_PLAY,
 	PLAYER_RETRY,
 	PLAYER_FLUSH,
+	PLAYER_FLUSHING,
+	PLAYER_RESET,
 } PlayerState;
 
 PlayerState playerState;
+bool stopPlayer;
+
+// FIXME: make part of queue structure
+bool seamlessPlay;
 
 void playerInit(void)
 {
-	playerState = PLAYER_IDLE;
+	playerState = PLAYER_RESET;
 }
 
 void play(i2s_chan_handle_t i2s_handle)
 {
-	size_t i;
 	int16_t sampleValue;
-	static uint32_t outputValue;  // Static so the value persists between _PLAY and _RETRY states
 	size_t bytesWritten;
+	i2s_std_clk_config_t clk_cfg;
+	// Static so the value persists between calls to play()
+	static uint32_t outputValue;  // needs to persist for PLAYER_RETRY
+	static Sound *wavSound;
+	static uint32_t oldSampleRate;
+	static uint32_t flushCount;
 
 	esp_task_wdt_reset();
 
@@ -286,16 +299,39 @@ void play(i2s_chan_handle_t i2s_handle)
 		case PLAYER_IDLE:
 			if(NULL != wavSoundNext)
 			{
-				wavSound = wavSoundNext;
-				wavSoundNext = NULL;
-				wavSound->open();
-				playerState = PLAYER_PLAY;
+				// Queue not empty
+				playerState = PLAYER_INIT;
 			}
 			break;
+
+		case PLAYER_INIT:
+			wavSound = wavSoundNext;  // Read the queue
+			wavSoundNext = NULL;      // Clear the queue
+			wavSound->open();         // Open the sound
+			if(wavSound->getSampleRate() == oldSampleRate)
+				playerState = PLAYER_PLAY;
+			else
+				playerState = PLAYER_RECONFIGURE;
+			break;
+
+		case PLAYER_RECONFIGURE:
+			clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(wavSound->getSampleRate());
+			digitalWrite(I2S_SD, 0);             // Disable amplifier
+			i2s_channel_disable(i2s_tx_handle);  // Disable I2S
+			i2s_channel_reconfig_std_clock(i2s_tx_handle, &clk_cfg);  // Reset sample rate
+			i2s_channel_enable(i2s_tx_handle);  // Enable I2S
+			digitalWrite(I2S_SD, 1);             // Enable amplifier
+			playerState = PLAYER_PLAY;
+			break;
+
 		case PLAYER_PLAY:
-			if(wavSound->available())
+			if(stopPlayer)
 			{
-				esp_task_wdt_reset();
+				playerState = PLAYER_FLUSH;
+			}
+			else if(wavSound->available())
+			{
+				// Sound not done, more samples available
 digitalWrite(AUX2, 1);
 				sampleValue = wavSound->getNextSample();
 digitalWrite(AUX2, 0);
@@ -311,24 +347,29 @@ digitalWrite(AUX2, 0);
 digitalWrite(AUX3, 1);
 				i2s_channel_write(i2s_handle, &outputValue, 4, &bytesWritten, 1);
 				if(0 == bytesWritten)
+				{
+					// Sample rejected, DMA buffer full
 					playerState = PLAYER_RETRY;
+				}
 digitalWrite(AUX3, 0);
 			}
 			else
 			{
+				// Sound done, no samples available
 				wavSound->close();
-				if(NULL == wavSoundNext)
+				if((NULL != wavSoundNext) && (seamlessPlay))
 				{
-					// No file queued, so flush
-					playerState = PLAYER_FLUSH;
+					// Queue not empty and seamless playing, so grab next
+					playerState = PLAYER_INIT;
 				}
 				else
 				{
-					// Another file is already queued, start playing immediately so it's seamless
-					playerState = PLAYER_IDLE;
+					// Otherwise, flush
+					playerState = PLAYER_FLUSH;
 				}
 			}
 			break;
+
 		case PLAYER_RETRY:
 digitalWrite(AUX4, 1);
 			i2s_channel_write(i2s_handle, &outputValue, 4, &bytesWritten, 1);
@@ -338,14 +379,43 @@ digitalWrite(AUX4, 1);
 				playerState = PLAYER_PLAY;
 digitalWrite(AUX4, 0);
 			break;
+
 		case PLAYER_FLUSH:
-			// Make sure current buffer is full to flush any partial data in it to the I2S engine
+			flushCount = 0;
+			#pragma GCC diagnostic push
+			#pragma GCC diagnostic ignored "-Wimplicit-fallthrough"
+			playerState = PLAYER_FLUSHING;
+			// Intentional fall through so we attempt one flush
+		case PLAYER_FLUSHING:
+			#pragma GCC diagnostic pop
 			outputValue = 0;
-			for(i=0; i<AUDIO_BUFFER_SIZE; i++)
+			i2s_channel_write(i2s_handle, &outputValue, 4, &bytesWritten, 1);
+			if(0 != bytesWritten)
 			{
-				i2s_channel_write(i2s_handle, &outputValue, 4, &bytesWritten, 1);
-				// If it times out, then the buffer is full
+				// Success
+				flushCount++;
 			}
+			if(flushCount >= dmaBufferSize)
+			{
+				if(NULL != wavSoundNext)
+				{
+					// Queue not empty
+					playerState = PLAYER_INIT;
+				}
+				else
+				{
+					// Queue empty
+					playerState = PLAYER_RESET;
+				}
+			}
+			break;
+		
+		case PLAYER_RESET:
+			digitalWrite(I2S_SD, 0);             // Disable amplifier
+			i2s_channel_disable(i2s_tx_handle);  // Disable I2S
+			oldSampleRate = 0;
+			stopPlayer = false;
+			playerState = PLAYER_IDLE;
 			break;
 	}
 }
@@ -586,15 +656,13 @@ void loop()
 		esp_task_wdt_reset();
 	}
 
-	timerAlarm(timer, 10000, true, 0);            // 1us * 10000 = 10ms, autoreload, unlimited reloads
-
 	// Default dma_frame_num = 240, dma_desc_num = 6 (i2s_common.h)
 	//    Total DMA size = 240 * 6 * 2 * 16 / 8 = 5760 bytes
 	i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
 	i2s_new_channel(&chan_cfg, &i2s_tx_handle, NULL);
 
 	i2s_std_config_t std_cfg = {
-		.clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(44100),
+		.clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(16000),
 		.slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO),
 		.gpio_cfg = {
 			.mclk = I2S_GPIO_UNUSED,
@@ -615,8 +683,9 @@ void loop()
 
 	i2s_chan_info_t chan_info;
 	i2s_channel_get_info(i2s_tx_handle, &chan_info);
+	dmaBufferSize = chan_info.total_dma_buf_size;
 	Serial.print("DMA buffer size: ");
-	Serial.println(chan_info.total_dma_buf_size);
+	Serial.println(dmaBufferSize);
 
 	digitalWrite(I2S_SD, 1);	// Enable amplifier
 
