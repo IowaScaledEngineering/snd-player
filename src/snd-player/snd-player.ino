@@ -440,7 +440,11 @@ void loop()
 	unsigned long pressTime = 0;
 	uint8_t inputStatus = 0;
 
-	std::vector<Sound *> sounds;
+	std::vector<Sound *> ambientSounds;
+	std::vector<Sound *> event1Sounds;
+	std::vector<Sound *> event2Sounds;
+	std::vector<Sound *> event3Sounds;
+	std::vector<Sound *> event4Sounds;
 	wavSoundNext.wav = NULL;
 	wavSoundNext.seamlessPlay = false;
 
@@ -609,7 +613,7 @@ void loop()
 
 					String fullFileName = String("ambient/") + fileName;
 
-					sounds.push_back(new SdSound(fullFileName.c_str(), wavDataSize, wavFile.position(), sampleRate));
+					ambientSounds.push_back(new SdSound(fullFileName.c_str(), wavDataSize, wavFile.position(), sampleRate));
 					usingSdSounds = true;
 					ambientMode = true;
 				}
@@ -646,7 +650,7 @@ void loop()
 	if(usingSdSounds)
 	{
 		Serial.print("Using SD card sounds (");
-		Serial.print(sounds.size());
+		Serial.print(ambientSounds.size() + event1Sounds.size() + event2Sounds.size() + event3Sounds.size() + event4Sounds.size());
 		Serial.println(")");
 		// Quadruple blink blue
 		digitalWrite(LEDA, 1); delay(250); digitalWrite(LEDA, 0); delay(250);
@@ -660,18 +664,15 @@ void loop()
 	}
 	else
 	{
-//		sounds.push_back(new MemSound(1, flangeClip01_wav, flangeClip01_wav_len, 16000));
-//		sounds.push_back(new MemSound(2, flangeClip02_wav, flangeClip02_wav_len, 16000));
-//		sounds.push_back(new MemSound(3, flangeClip03_wav, flangeClip03_wav_len, 16000));
-
-		Serial.print("Using built-in sounds (");
-		Serial.print(sounds.size());
-		Serial.println(")");
-		// Double blink blue
-		digitalWrite(LEDA, 1); delay(250); digitalWrite(LEDA, 0); delay(250);
-		esp_task_wdt_reset();
-		digitalWrite(LEDA, 1); delay(250); digitalWrite(LEDA, 0); delay(250);
-		esp_task_wdt_reset();
+		Serial.print("No valid sounds on SD card!");
+		// Blink blue / orange
+		while(1)
+		{
+			digitalWrite(LEDA, 1); delay(100); digitalWrite(LEDA, 0);
+			esp_task_wdt_reset();
+			digitalWrite(LEDB, 1); delay(100); digitalWrite(LEDB, 0);
+			esp_task_wdt_reset();
+		}
 	}
 
 	// Default dma_frame_num = 240, dma_desc_num = 6 (i2s_common.h)
@@ -861,20 +862,20 @@ void loop()
 				// Have to initialize to something, so will never play sample 255 first
 				// Can't be zero since it would never play anything with a single sample
 				uint8_t sampleNum;
-				sampleNum = random(0, sounds.size());
-				if(sounds.size() > 2)
+				sampleNum = random(0, ambientSounds.size());
+				if(ambientSounds.size() > 2)
 				{
 					// With three or more sounds, don't repeat the last one
 					while(sampleNum == lastSampleNum)
 					{
 						esp_task_wdt_reset();
-						sampleNum = random(0, sounds.size());
+						sampleNum = random(0, ambientSounds.size());
 						Serial.println("*");
 					}
 				}
 				Serial.print("Queueing... ");
 				Serial.println(sampleNum);
-				wavSoundNext.wav = sounds[sampleNum];
+				wavSoundNext.wav = ambientSounds[sampleNum];
 				lastSampleNum = sampleNum;
 				state = SOUNDPLAYER_AMBIENT_PLAY;
 				break;
@@ -913,7 +914,11 @@ digitalWrite(AUX1, 0);
 		{
 			restart = false;
 			Serial.print("\n*** Restarting ***\n\n");
-			sounds.clear();
+			ambientSounds.clear();
+			event1Sounds.clear();
+			event2Sounds.clear();
+			event3Sounds.clear();
+			event4Sounds.clear();
 			break;	// Restart the loop() function
 		}
 
