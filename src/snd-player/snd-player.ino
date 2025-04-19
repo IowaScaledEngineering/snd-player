@@ -30,10 +30,6 @@ LICENSE:
 
 #include "sound.h"
 
-#include "squeal/flangeClip01.h"
-#include "squeal/flangeClip02.h"
-#include "squeal/flangeClip03.h"
-
 // 3 sec watchdog 
 #define TWDT_TIMEOUT_MS    3000
 
@@ -441,7 +437,7 @@ void loop()
 	unsigned long pressTime = 0;
 	uint8_t inputStatus = 0;
 
-	std::vector<Sound *> squealSounds;
+	std::vector<Sound *> sounds;
 	wavSoundNext.wav = NULL;
 	wavSoundNext.seamlessPlay = false;
 
@@ -458,24 +454,14 @@ void loop()
 	Serial.println(GIT_REV, HEX);
 
 	// Read NVM configuration
-	preferences.begin("squeal", false);
+	preferences.begin("soundplayer", false);
 	volumeStep = preferences.getUChar("volume", VOL_STEP_NOM);
-	silenceDecisecsMax = preferences.getUChar("silenceMax", 50);
-	silenceDecisecsMin = preferences.getUChar("silenceMin", 0);
-
-	volumeUpCoef = preferences.getUChar("volumeUp", 10);
-	if(0 == volumeUpCoef)
-	{
-		volumeUpCoef = 1;
-		preferences.putUChar("volumeUp", volumeUpCoef);
-	}
-
-	volumeDownCoef = preferences.getUChar("volumeDown", 8);
-	if(0 == volumeDownCoef)
-	{
-		volumeDownCoef = 1;
-		preferences.putUChar("volumeDown", volumeDownCoef);
-	}
+	
+	// Set defaults
+	silenceDecisecsMax = 50;
+	silenceDecisecsMin = 0;
+	volumeUpCoef = 10;
+	volumeDownCoef = 8;
 
 	esp_task_wdt_reset();
 
@@ -604,7 +590,7 @@ void loop()
 				Serial.print(wavFile.position());
 				Serial.println(")");
 
-				squealSounds.push_back(new SdSound(fileName, wavDataSize, wavFile.position(), sampleRate));
+				sounds.push_back(new SdSound(fileName, wavDataSize, wavFile.position(), sampleRate));
 				usingSdSounds = true;
 			}
 			wavFile.close();
@@ -633,7 +619,7 @@ void loop()
 	if(usingSdSounds)
 	{
 		Serial.print("Using SD card sounds (");
-		Serial.print(squealSounds.size());
+		Serial.print(sounds.size());
 		Serial.println(")");
 		// Quadruple blink blue
 		digitalWrite(LEDA, 1); delay(250); digitalWrite(LEDA, 0); delay(250);
@@ -647,12 +633,12 @@ void loop()
 	}
 	else
 	{
-		squealSounds.push_back(new MemSound(1, flangeClip01_wav, flangeClip01_wav_len, 16000));
-		squealSounds.push_back(new MemSound(2, flangeClip02_wav, flangeClip02_wav_len, 16000));
-		squealSounds.push_back(new MemSound(3, flangeClip03_wav, flangeClip03_wav_len, 16000));
+//		sounds.push_back(new MemSound(1, flangeClip01_wav, flangeClip01_wav_len, 16000));
+//		sounds.push_back(new MemSound(2, flangeClip02_wav, flangeClip02_wav_len, 16000));
+//		sounds.push_back(new MemSound(3, flangeClip03_wav, flangeClip03_wav_len, 16000));
 
 		Serial.print("Using built-in sounds (");
-		Serial.print(squealSounds.size());
+		Serial.print(sounds.size());
 		Serial.println(")");
 		// Double blink blue
 		digitalWrite(LEDA, 1); delay(250); digitalWrite(LEDA, 0); delay(250);
@@ -801,86 +787,6 @@ void loop()
 			uint8_t serialChar = Serial.read();
 			switch(serialChar)
 			{
-				case 'a':
-					if(silenceDecisecsMax < 255)
-					{
-						silenceDecisecsMax++;
-						preferences.putUChar("silenceMax", silenceDecisecsMax);
-					}
-					Serial.print("Silence Max: ");
-					Serial.print(silenceDecisecsMax/10.0, 1);
-					Serial.println("s");
-					break;
-				case 'z':
-					if(silenceDecisecsMax > silenceDecisecsMin)
-					{
-						silenceDecisecsMax--;
-						preferences.putUChar("silenceMax", silenceDecisecsMax);
-					}
-					Serial.print("Silence Max: ");
-					Serial.print(silenceDecisecsMax/10.0, 1);
-					Serial.println("s");
-					break;
-
-				case 's':
-					if(silenceDecisecsMin < silenceDecisecsMax)
-					{
-						silenceDecisecsMin++;
-						preferences.putUChar("silenceMin", silenceDecisecsMin);
-					}
-					Serial.print("Silence Min: ");
-					Serial.print(silenceDecisecsMin/10.0, 1);
-					Serial.println("s");
-					break;
-				case 'x':
-					if(silenceDecisecsMin > 0)
-					{
-						silenceDecisecsMin--;
-						preferences.putUChar("silenceMin", silenceDecisecsMin);
-					}
-					Serial.print("Silence Min: ");
-					Serial.print(silenceDecisecsMin/10.0, 1);
-					Serial.println("s");
-					break;
-
-				case 'd':
-					if(volumeUpCoef < 255)
-					{
-						volumeUpCoef++;
-						preferences.putUChar("volumeUp", volumeUpCoef);
-					}
-					Serial.print("Volume Up Coef: ");
-					Serial.println(volumeUpCoef);
-					break;
-				case 'c':
-					if(volumeUpCoef > 1)
-					{
-						volumeUpCoef--;
-						preferences.putUChar("volumeUp", volumeUpCoef);
-					}
-					Serial.print("Volume Up Coef: ");
-					Serial.println(volumeUpCoef);
-					break;
-
-				case 'f':
-					if(volumeDownCoef < 255)
-					{
-						volumeDownCoef++;
-						preferences.putUChar("volumeDown", volumeDownCoef);
-					}
-					Serial.print("Volume Down Coef: ");
-					Serial.println(volumeDownCoef);
-					break;
-				case 'v':
-					if(volumeDownCoef > 1)
-					{
-						volumeDownCoef--;
-						preferences.putUChar("volumeDown", volumeDownCoef);
-					}
-					Serial.print("Volume Down Coef: ");
-					Serial.println(volumeDownCoef);
-					break;
-
 				case 'q':
 					restart = true;
 					break;
@@ -888,7 +794,11 @@ void loop()
 		}
 
 		// Figure out if any enable inputs are pressed and light LED
-		bool enable = (buttonsPressed & (EN1_INPUT | EN2_INPUT | EN3_INPUT | EN4_INPUT)) ? true : false;
+		bool enable1 = (buttonsPressed & (EN1_INPUT)) ? true : false;
+		bool enable2 = (buttonsPressed & (EN2_INPUT)) ? true : false;
+		bool enable3 = (buttonsPressed & (EN3_INPUT)) ? true : false;
+		bool enable4 = (buttonsPressed & (EN4_INPUT)) ? true : false;
+		bool enable = enable1 || enable2 || enable3 || enable4;
 
 		if(enable)
 		{
@@ -918,20 +828,20 @@ void loop()
 			// Have to initialize to something, so will never play sample 255 first
 			// Can't be zero since it would never play anything with a single sample
 			uint8_t sampleNum;
-			sampleNum = random(0, squealSounds.size());
-			if(squealSounds.size() > 2)
+			sampleNum = random(0, sounds.size());
+			if(sounds.size() > 2)
 			{
 				// With three or more sounds, don't repeat the last one
 				while(sampleNum == lastSampleNum)
 				{
 					esp_task_wdt_reset();
-					sampleNum = random(0, squealSounds.size());
+					sampleNum = random(0, sounds.size());
 					Serial.println("*");
 				}
 			}
 			Serial.print("Queueing... ");
 			Serial.println(sampleNum);
-			wavSoundNext.wav = squealSounds[sampleNum];
+			wavSoundNext.wav = sounds[sampleNum];
 			lastSampleNum = sampleNum;
 		}
 
@@ -946,7 +856,7 @@ digitalWrite(AUX1, 0);
 		{
 			restart = false;
 			Serial.print("\n*** Restarting ***\n\n");
-			squealSounds.clear();
+			sounds.clear();
 			break;	// Restart the loop() function
 		}
 

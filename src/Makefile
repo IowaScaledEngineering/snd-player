@@ -39,9 +39,6 @@ upload:
 	# Need to provide board option to reliably upload
 	$(ARDUINO) upload -v --input-dir $(BUILD_DIR)  -b $(BOARD) -p $(PORT) $(BASE_NAME)
 
-firmware:
-	esptool.py --chip esp32s2 --port $(PORT) --baud 921600  --before default_reset --after hard_reset write_flash  -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x1000 $(BIN)/snd-squeal.ino.bootloader.bin 0x8000 $(BIN)/snd-squeal.ino.partitions.bin 0xe000 $(BIN)/boot_app0.bin 0x10000 $(BIN)/snd-squeal.ino.bin
-
 terminal:
 	miniterm.py $(PORT) 115200
 
