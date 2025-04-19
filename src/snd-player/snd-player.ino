@@ -902,21 +902,6 @@ void loop()
 				break;
 		}
 
-/*
-    // Add some silence
-    uint8_t silenceDecisecs = random(silenceDecisecsMin, silenceDecisecsMax);
-    Serial.print("Silence... ");
-    Serial.print(silenceDecisecs/10.0, 1);
-    Serial.println("s");
-    for(i=0; i<silenceDecisecs; i++)
-    {
-      esp_task_wdt_reset();
-      Serial.print(".");
-      delay(100);
-    }
-    Serial.println("");
-*/
-
 
 digitalWrite(AUX1, 1);
 		// Pump the sound player
