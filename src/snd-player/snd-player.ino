@@ -420,19 +420,98 @@ digitalWrite(AUX4, 0);
 	}
 }
 
+
+struct WavData {
+	uint32_t sampleRate;
+	uint32_t wavDataSize;
+	size_t dataStartPosition;
+};
+
+
+bool validateWavFile(File *wavFile, struct WavData *wavData)
+{
+	const char *fileName;
+	size_t fileNameLength;
+	uint16_t channels;
+	uint16_t bitsPerSample;
+	uint32_t sampleRate;
+	uint32_t wavDataSize;
+
+	fileName = wavFile->name();
+	fileNameLength = strlen(fileName);
+	if(fileNameLength < 5)
+		return false;  // Filename too short (x.wav = min 5 chars)
+	const char *extension = &fileName[strlen(fileName)-4];
+	if(strcasecmp(extension, ".wav"))
+	{
+		Serial.print("	Ignoring: ");
+		Serial.println(fileName);
+		return false;  // Not a wav file (by extension anyway)
+	}
+	
+	if(!wavFile->find("fmt "))  // Includes trailing space
+	{
+		Serial.print("! No fmt section: ");
+		Serial.println(fileName);
+		return false;
+	}
+
+	wavFile->seek(wavFile->position() + 6);  // Seek to number of channels
+	wavFile->read((uint8_t*)&channels, 2);  // Read channels - WAV is little endian, only works if uC is also little endian
+
+	if(channels > 1)
+	{
+		Serial.print("! Not mono: ");
+		Serial.println(fileName);
+		return false;
+	}
+
+	wavFile->read((uint8_t*)&sampleRate, 4);  // Read sample rate - WAV is little endian, only works if uC is also little endian
+	wavData->sampleRate = sampleRate;
+
+	if((8000 != sampleRate) && (16000 != sampleRate) && (32000 != sampleRate) && (44100 != sampleRate))
+	{
+		Serial.print("! Incorrect sample rate: ");
+		Serial.println(fileName);
+		return false;
+	}
+
+	wavFile->seek(wavFile->position() + 6);  // Seek to bits per sample
+	wavFile->read((uint8_t*)&bitsPerSample, 2);	// Read bits per sample - WAV is little endian, only works if uC is also little endian
+
+	if(16 != bitsPerSample)
+	{
+		Serial.print("! Not 16-bit: ");
+		Serial.println(fileName);
+		return false;
+	}
+
+	if(!wavFile->find("data"))
+	{
+		Serial.print("! No data section: ");
+		Serial.println(fileName);
+		return false;
+	}
+
+	wavFile->read((uint8_t*)&wavDataSize, 4);	// Read data size - WAV is little endian, only works if uC is also little endian
+	wavData->wavDataSize = wavDataSize;
+	// Actual data is now the current position
+	
+	wavData->dataStartPosition = wavFile->position();
+	return true;
+}
+
+
 void loop()
 {
 	bool usingSdSounds = false;
 	bool ambientMode = false;
-	size_t fileNameLength;
 	File rootDir;
 	File wavFile;
-	const char *fileName;
-	uint16_t channels = 0;
-	uint32_t sampleRate = 0;
-	uint16_t bitsPerSample = 0;
-	uint32_t wavDataSize = 0;
-	uint8_t lastSampleNum = 255;
+	WavData wavData;
+
+	uint8_t lastSampleNum = 255;   // Have to initialize to something, so will never play sample 255 first, Can't be zero since it would never play anything with a single sample
+
 	uint32_t silenceDecisecs;
 	unsigned long silenceStart;
 
@@ -476,7 +555,7 @@ void loop()
 	volumeStep = preferences.getUChar("volume", VOL_STEP_NOM);
 	
 	// Set defaults
-	silenceDecisecsMax = 50;
+	silenceDecisecsMax = 0;
 	silenceDecisecsMin = 0;
 	volumeUpCoef = 10;
 	volumeDownCoef = 8;
@@ -540,82 +619,25 @@ void loop()
 				}
 				else
 				{
-					fileName = wavFile.name();
-					fileNameLength = strlen(fileName);
-					if(fileNameLength < 5)
-						continue;  // Filename too short (x.wav = min 5 chars)
-					const char *extension = &fileName[strlen(fileName)-4];
-					if(strcasecmp(extension, ".wav"))
+					if(validateWavFile(&wavFile, &wavData))
 					{
-						Serial.print("	Ignoring: ");
-						Serial.println(fileName);
-						continue;  // Not a wav file (by extension anyway)
+						// If we got here, then it looks like a valid wav file
+						Serial.print("+ Adding ");
+						Serial.print(wavFile.name());
+						Serial.print(" (");
+						Serial.print(wavData.sampleRate);
+						Serial.print(",");
+						Serial.print(wavData.wavDataSize);
+						Serial.print(",");
+						Serial.print(wavData.dataStartPosition);
+						Serial.println(")");
+
+						String fullFileName = String("ambient/") + wavFile.name();
+
+						ambientSounds.push_back(new SdSound(fullFileName.c_str(), wavData.wavDataSize, wavData.dataStartPosition, wavData.sampleRate));
+						usingSdSounds = true;
+						ambientMode = true;
 					}
-					
-					if(!wavFile.find("fmt "))  // Includes trailing space
-					{
-						Serial.print("! No fmt section: ");
-						Serial.println(fileName);
-						continue;
-					}
-
-					wavFile.seek(wavFile.position() + 6);  // Seek to number of channels
-					wavFile.read((uint8_t*)&channels, 2);  // Read channels - WAV is little endian, only works if uC is also little endian
-
-					if(channels > 1)
-					{
-						Serial.print("! Not mono: ");
-						Serial.println(fileName);
-						continue;
-					}
-
-					wavFile.read((uint8_t*)&sampleRate, 4);  // Read sample rate - WAV is little endian, only works if uC is also little endian
-
-					if((8000 != sampleRate) && (16000 != sampleRate) && (32000 != sampleRate) && (44100 != sampleRate))
-					{
-						Serial.print("! Incorrect sample rate: ");
-						Serial.println(fileName);
-						continue;
-					}
-
-					wavFile.seek(wavFile.position() + 6);  // Seek to bits per sample
-					wavFile.read((uint8_t*)&bitsPerSample, 2);	// Read bits per sample - WAV is little endian, only works if uC is also little endian
-
-					if(16 != bitsPerSample)
-					{
-						Serial.print("! Not 16-bit: ");
-						Serial.println(fileName);
-						continue;
-					}
-
-					if(!wavFile.find("data"))
-					{
-						Serial.print("! No data section: ");
-						Serial.println(fileName);
-						continue;
-					}
-
-					// If we got here, then it looks like a valid wav file
-					// Get data length and offset
-
-					wavFile.read((uint8_t*)&wavDataSize, 4);	// Read data size - WAV is little endian, only works if uC is also little endian
-					// Offset is now the current position
-
-					Serial.print("+ Adding ");
-					Serial.print(fileName);
-					Serial.print(" (");
-					Serial.print(sampleRate);
-					Serial.print(",");
-					Serial.print(wavDataSize);
-					Serial.print(",");
-					Serial.print(wavFile.position());
-					Serial.println(")");
-
-					String fullFileName = String("ambient/") + fileName;
-
-					ambientSounds.push_back(new SdSound(fullFileName.c_str(), wavDataSize, wavFile.position(), sampleRate));
-					usingSdSounds = true;
-					ambientMode = true;
 				}
 				wavFile.close();
 			}
@@ -624,8 +646,9 @@ void loop()
 		else
 		{
 			// Not ambient mode
+			ambientMode = false;
+
 			// FIXME: do stuff
-					ambientMode = false;
 		}
 	}
 
@@ -818,6 +841,10 @@ void loop()
 				case 'q':
 					restart = true;
 					break;
+				case '~':
+					Serial.print("Clearing preferences...");
+					preferences.clear();
+					break;
 			}
 		}
 
@@ -858,9 +885,6 @@ void loop()
 				Serial.print("Heap free: ");
 				Serial.println(esp_get_free_heap_size());
 
-				// Don't play the same sample twice in a row
-				// Have to initialize to something, so will never play sample 255 first
-				// Can't be zero since it would never play anything with a single sample
 				uint8_t sampleNum;
 				sampleNum = random(0, ambientSounds.size());
 				if(ambientSounds.size() > 2)
