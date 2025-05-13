@@ -501,19 +501,60 @@ bool validateWavFile(File *wavFile, struct WavData *wavData)
 	return true;
 }
 
+void findWavFiles(File *rootDir, std::vector<Sound *> *soundsVector)
+{
+	File wavFile;
+	WavData wavData;
+
+	while(true)
+	{
+		esp_task_wdt_reset();
+		wavFile = rootDir->openNextFile();
+
+		if (!wavFile)
+		{
+			break;	// No more files
+		}
+		if(wavFile.isDirectory())
+		{
+			Serial.print("	Skipping directory: ");
+			Serial.println(wavFile.name());
+		}
+		else
+		{
+			if(validateWavFile(&wavFile, &wavData))
+			{
+				// If we got here, then it looks like a valid wav file
+				Serial.print("+ Adding ");
+				Serial.print(wavFile.name());
+				Serial.print(" (");
+				Serial.print(wavData.sampleRate);
+				Serial.print(",");
+				Serial.print(wavData.wavDataSize);
+				Serial.print(",");
+				Serial.print(wavData.dataStartPosition);
+				Serial.println(")");
+
+				String fullFileName = String("ambient/") + wavFile.name();
+
+				soundsVector->push_back(new SdSound(fullFileName.c_str(), wavData.wavDataSize, wavData.dataStartPosition, wavData.sampleRate));
+			}
+		}
+		wavFile.close();
+	}
+}
+
 
 void loop()
 {
-	bool usingSdSounds = false;
-	bool ambientMode = false;
 	File rootDir;
-	File wavFile;
-	WavData wavData;
 
 	uint8_t lastSampleNum = 255;   // Have to initialize to something, so will never play sample 255 first, Can't be zero since it would never play anything with a single sample
 
 	uint32_t silenceDecisecs;
 	unsigned long silenceStart;
+
+	bool ambientMode = false;
 
 	uint8_t buttonsPressed = 0, oldButtonsPressed = 0;
 	unsigned long pressTime = 0;
@@ -602,46 +643,13 @@ void loop()
 		{
 			// Ambient mode, find WAV files
 			Serial.println("\nFound ambient directory");
-
-			while(true)
-			{
-				esp_task_wdt_reset();
-				wavFile = rootDir.openNextFile();
-
-				if (!wavFile)
-				{
-					break;	// No more files
-				}
-				if(wavFile.isDirectory())
-				{
-					Serial.print("	Skipping directory: ");
-					Serial.println(wavFile.name());
-				}
-				else
-				{
-					if(validateWavFile(&wavFile, &wavData))
-					{
-						// If we got here, then it looks like a valid wav file
-						Serial.print("+ Adding ");
-						Serial.print(wavFile.name());
-						Serial.print(" (");
-						Serial.print(wavData.sampleRate);
-						Serial.print(",");
-						Serial.print(wavData.wavDataSize);
-						Serial.print(",");
-						Serial.print(wavData.dataStartPosition);
-						Serial.println(")");
-
-						String fullFileName = String("ambient/") + wavFile.name();
-
-						ambientSounds.push_back(new SdSound(fullFileName.c_str(), wavData.wavDataSize, wavData.dataStartPosition, wavData.sampleRate));
-						usingSdSounds = true;
-						ambientMode = true;
-					}
-				}
-				wavFile.close();
-			}
+			findWavFiles(&rootDir, &ambientSounds);
 			rootDir.close();
+			if(ambientSounds.size() > 0)
+			{
+				// Only set Ambient mode if sounds are found
+				ambientMode = true;
+			}
 		}
 		else
 		{
@@ -670,7 +678,7 @@ void loop()
 
 	esp_task_wdt_reset();
 
-	if(usingSdSounds)
+	if(ambientMode || (event1Sounds.size() > 0) || (event2Sounds.size() > 0) || (event3Sounds.size() > 0) || (event4Sounds.size() > 0))
 	{
 		Serial.print("Using SD card sounds (");
 		Serial.print(ambientSounds.size() + event1Sounds.size() + event2Sounds.size() + event3Sounds.size() + event4Sounds.size());
