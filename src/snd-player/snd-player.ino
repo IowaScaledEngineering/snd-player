@@ -122,6 +122,45 @@ uint8_t silenceDecisecsMin = 0;
 
 Preferences preferences;
 
+
+typedef enum
+{
+	PLAYER_IDLE,
+	PLAYER_INIT,
+	PLAYER_RECONFIGURE,
+	PLAYER_PLAY,
+	PLAYER_RETRY,
+	PLAYER_FLUSH,
+	PLAYER_FLUSHING,
+	PLAYER_RESET,
+} PlayerState;
+
+PlayerState playerState;
+bool stopPlayer;
+
+struct WavSound {
+	Sound *wav;
+	bool seamlessPlay;
+};
+
+struct WavSound wavSoundNext;
+uint32_t dmaBufferSize;
+
+typedef enum
+{
+	MODE_ONESHOT,
+	MODE_CONTINUOUS,
+	MODE_BME,
+} ConfigMode;
+
+struct EventConfig {
+	ConfigMode mode;
+	bool shuffle;
+	bool level;
+};
+
+
+
 uint8_t debounce(uint8_t debouncedState, uint8_t newInputs)
 {
 	static uint8_t clock_A = 0, clock_B = 0;
@@ -251,28 +290,7 @@ void setup()
 	timerAlarm(timer, 10000, true, 0);            // 1us * 10000 = 10ms, autoreload, unlimited reloads
 }
 
-typedef enum
-{
-	PLAYER_IDLE,
-	PLAYER_INIT,
-	PLAYER_RECONFIGURE,
-	PLAYER_PLAY,
-	PLAYER_RETRY,
-	PLAYER_FLUSH,
-	PLAYER_FLUSHING,
-	PLAYER_RESET,
-} PlayerState;
 
-PlayerState playerState;
-bool stopPlayer;
-
-struct WavSound {
-	Sound *wav;
-	bool seamlessPlay;
-};
-
-struct WavSound wavSoundNext;
-uint32_t dmaBufferSize;
 
 void playerInit(void)
 {
@@ -501,7 +519,7 @@ bool validateWavFile(File *wavFile, struct WavData *wavData)
 	return true;
 }
 
-void findWavFiles(File *rootDir, std::vector<Sound *> *soundsVector)
+void findWavFiles(File *rootDir, String dirName, std::vector<Sound *> *soundsVector, EventConfig *config)
 {
 	File wavFile;
 	WavData wavData;
@@ -522,11 +540,29 @@ void findWavFiles(File *rootDir, std::vector<Sound *> *soundsVector)
 		}
 		else
 		{
-			if(validateWavFile(&wavFile, &wavData))
+			if(0 == strcmp(wavFile.name(), "bme.opt"))
+			{
+				config->mode = MODE_BME;
+			}
+			else if(0 == strcmp(wavFile.name(), "continous.opt"))
+			{
+				config->mode = MODE_CONTINUOUS;
+			}
+			else if(0 == strcmp(wavFile.name(), "shuffle.opt"))
+			{
+				config->shuffle = true;
+			}
+			else if(0 == strcmp(wavFile.name(), "level.opt"))
+			{
+				config->level = true;
+			}
+			else if(validateWavFile(&wavFile, &wavData))
 			{
 				// If we got here, then it looks like a valid wav file
+				String fullFileName = dirName + wavFile.name();
+
 				Serial.print("+ Adding ");
-				Serial.print(wavFile.name());
+				Serial.print(fullFileName);
 				Serial.print(" (");
 				Serial.print(wavData.sampleRate);
 				Serial.print(",");
@@ -534,8 +570,6 @@ void findWavFiles(File *rootDir, std::vector<Sound *> *soundsVector)
 				Serial.print(",");
 				Serial.print(wavData.dataStartPosition);
 				Serial.println(")");
-
-				String fullFileName = String("ambient/") + wavFile.name();
 
 				soundsVector->push_back(new SdSound(fullFileName.c_str(), wavData.wavDataSize, wavData.dataStartPosition, wavData.sampleRate));
 			}
@@ -560,13 +594,24 @@ void loop()
 	unsigned long pressTime = 0;
 	uint8_t inputStatus = 0;
 
+	uint32_t i;
+	uint32_t activeEvent;
+
+	uint8_t sampleNum;
+
 	std::vector<Sound *> ambientSounds;
-	std::vector<Sound *> event1Sounds;
-	std::vector<Sound *> event2Sounds;
-	std::vector<Sound *> event3Sounds;
-	std::vector<Sound *> event4Sounds;
+	std::vector<Sound *> eventSounds[4];
 	wavSoundNext.wav = NULL;
 	wavSoundNext.seamlessPlay = false;
+
+	EventConfig ambientConfig;  // not used, but needed for symmetry with other events
+	EventConfig eventConfig[4];
+	for(i=0; i<4; i++)
+	{
+		eventConfig[i].mode = MODE_ONESHOT;
+		eventConfig[i].shuffle = false;
+		eventConfig[i].level = false;
+	}
 
 	typedef enum
 	{
@@ -575,6 +620,7 @@ void loop()
 		SOUNDPLAYER_AMBIENT_QUEUE,
 		SOUNDPLAYER_AMBIENT_PLAY,
 		SOUNDPLAYER_AMBIENT_SILENCE,
+		SOUNDPLAYER_ONESHOT_QUEUE,
 	} SoundplayerState;
 
 	SoundplayerState state = SOUNDPLAYER_IDLE;
@@ -643,7 +689,7 @@ void loop()
 		{
 			// Ambient mode, find WAV files
 			Serial.println("\nFound ambient directory");
-			findWavFiles(&rootDir, &ambientSounds);
+			findWavFiles(&rootDir, "ambient/", &ambientSounds, &ambientConfig);
 			rootDir.close();
 			if(ambientSounds.size() > 0)
 			{
@@ -653,10 +699,20 @@ void loop()
 		}
 		else
 		{
-			// Not ambient mode
+			// Not ambient mode, check event directories
 			ambientMode = false;
 
-			// FIXME: do stuff
+			for(i=0; i<4; i++)
+			{
+				char rootDirectory[8] = "/event_";  // SD.open need preceding slash
+				rootDirectory[6] = '1' + i;
+				char directoryName[8] = "event_/";  // filename needs trailing slash
+				directoryName[5] = '1' + i;
+				if((rootDir = SD.open(rootDirectory)))
+				{
+					findWavFiles(&rootDir, directoryName, &eventSounds[i], &eventConfig[i]);
+				}
+			}
 		}
 	}
 
@@ -678,10 +734,10 @@ void loop()
 
 	esp_task_wdt_reset();
 
-	if(ambientMode || (event1Sounds.size() > 0) || (event2Sounds.size() > 0) || (event3Sounds.size() > 0) || (event4Sounds.size() > 0))
+	if(ambientMode || (eventSounds[0].size() > 0) || (eventSounds[1].size() > 0) || (eventSounds[2].size() > 0) || (eventSounds[3].size() > 0))
 	{
 		Serial.print("Using SD card sounds (");
-		Serial.print(ambientSounds.size() + event1Sounds.size() + event2Sounds.size() + event3Sounds.size() + event4Sounds.size());
+		Serial.print(ambientSounds.size() + eventSounds[0].size() + eventSounds[1].size() + eventSounds[2].size() + eventSounds[3].size());
 		Serial.println(")");
 		// Quadruple blink blue
 		digitalWrite(LEDA, 1); delay(250); digitalWrite(LEDA, 0); delay(250);
@@ -857,11 +913,12 @@ void loop()
 		}
 
 		// Figure out if any enable inputs are pressed and light LED
-		bool enable1 = (buttonsPressed & (EN1_INPUT)) ? true : false;
-		bool enable2 = (buttonsPressed & (EN2_INPUT)) ? true : false;
-		bool enable3 = (buttonsPressed & (EN3_INPUT)) ? true : false;
-		bool enable4 = (buttonsPressed & (EN4_INPUT)) ? true : false;
-		bool enable = enable1 || enable2 || enable3 || enable4;
+		bool enableInput[4];
+		enableInput[0] = (buttonsPressed & (EN1_INPUT)) ? true : false;
+		enableInput[1] = (buttonsPressed & (EN2_INPUT)) ? true : false;
+		enableInput[2] = (buttonsPressed & (EN3_INPUT)) ? true : false;
+		enableInput[3] = (buttonsPressed & (EN4_INPUT)) ? true : false;
+		bool enable = enableInput[0] || enableInput[1] || enableInput[2] || enableInput[3];
 
 		if(enable)
 		{
@@ -882,6 +939,20 @@ void loop()
 				else
 				{
 					// Not ambient mode, wait for inputs
+					if(enable)
+					{
+						for(activeEvent=0; activeEvent<4; activeEvent++)
+						{
+							// Find first input activated
+							if(enableInput[activeEvent])
+								break;
+						}
+						if(MODE_ONESHOT == eventConfig[activeEvent].mode)
+						{
+							state = SOUNDPLAYER_ONESHOT_QUEUE;
+						}
+
+					}
 				}
 				break;
 			case SOUNDPLAYER_AMBIENT_INIT:
@@ -893,7 +964,6 @@ void loop()
 				Serial.print("Heap free: ");
 				Serial.println(esp_get_free_heap_size());
 
-				uint8_t sampleNum;
 				sampleNum = random(0, ambientSounds.size());
 				if(ambientSounds.size() > 2)
 				{
@@ -933,6 +1003,23 @@ void loop()
 					state = SOUNDPLAYER_AMBIENT_QUEUE;
 				}
 				break;
+
+
+
+			case SOUNDPLAYER_ONESHOT_QUEUE:
+				unmute = true;
+				Serial.print("Event ");
+				Serial.print(activeEvent);
+				Serial.println(" One Shot Mode");
+				Serial.print("Heap free: ");
+				Serial.println(esp_get_free_heap_size());
+
+				sampleNum = random(0, eventSounds[activeEvent].size());
+				Serial.print("Queueing... ");
+				Serial.println(sampleNum);
+				wavSoundNext.wav = eventSounds[activeEvent][sampleNum];
+				state = SOUNDPLAYER_IDLE;
+				break;
 		}
 
 
@@ -947,10 +1034,10 @@ digitalWrite(AUX1, 0);
 			restart = false;
 			Serial.print("\n*** Restarting ***\n\n");
 			ambientSounds.clear();
-			event1Sounds.clear();
-			event2Sounds.clear();
-			event3Sounds.clear();
-			event4Sounds.clear();
+			eventSounds[0].clear();
+			eventSounds[1].clear();
+			eventSounds[2].clear();
+			eventSounds[3].clear();
 			break;	// Restart the loop() function
 		}
 
