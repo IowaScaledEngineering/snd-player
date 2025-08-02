@@ -595,7 +595,7 @@ void loop()
 	uint8_t inputStatus = 0;
 
 	uint32_t i;
-	uint32_t activeEvent;
+	int32_t activeEvent = -1;
 
 	uint8_t sampleNum;
 
@@ -941,17 +941,23 @@ void loop()
 					// Not ambient mode, wait for inputs
 					if(enable)
 					{
-						for(activeEvent=0; activeEvent<4; activeEvent++)
+						for(i=0; i<4; i++)
 						{
 							// Find first input activated
-							if(enableInput[activeEvent])
+							if(enableInput[i] && (-1 == activeEvent))  // Don't retrigger until enable released
+							{
+								activeEvent = i;
+								if(MODE_ONESHOT == eventConfig[activeEvent].mode)
+								{
+									state = SOUNDPLAYER_ONESHOT_QUEUE;
+								}
 								break;
+							}
 						}
-						if(MODE_ONESHOT == eventConfig[activeEvent].mode)
-						{
-							state = SOUNDPLAYER_ONESHOT_QUEUE;
-						}
-
+					}
+					else
+					{
+						activeEvent = -1;
 					}
 				}
 				break;
