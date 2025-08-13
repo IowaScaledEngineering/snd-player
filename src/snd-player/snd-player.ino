@@ -540,6 +540,13 @@ void findWavFiles(File *rootDir, String dirName, std::vector<Sound *> *soundsVec
 		}
 		else
 		{
+// One Shot Mode: No option file
+//
+// Beginning-Middle-End Mode: bme.opt
+//
+// Continuous Mode: continuous.opt
+//    Shuffle after each WAV: shuffle.opt
+//    Level sensitive (end immediately): level.opt
 			if(0 == strcmp(wavFile.name(), "bme.opt"))
 			{
 				config->mode = MODE_BME;
@@ -944,7 +951,7 @@ void loop()
 						for(i=0; i<4; i++)
 						{
 							// Find first input activated
-							if(enableInput[i] && (-1 == activeEvent))  // Don't retrigger until enable released
+							if(enableInput[i] && (-1 == activeEvent))  // Don't retrigger until enable released (needed for one shot mode)
 							{
 								activeEvent = i;
 								if(MODE_ONESHOT == eventConfig[activeEvent].mode)
