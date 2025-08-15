@@ -96,12 +96,14 @@ class SdSound : public Sound
 				// We're out of bytes (or had an odd number for some strange reason)
 				// and there's more of the file to grab, so grab it
 				if(available() < FILE_BUFFER_SIZE)
+				{
 					bytesToRead = available();
+				}
 				else
+				{
 					bytesToRead = FILE_BUFFER_SIZE;
-
+				}
 				bytesRead = wavFile.read(fileBuffer, bytesToRead);
-				byteCount += bytesRead;
 				fileBufferLength = bytesRead;
 				fileBufferPosition = 0;
 			}
@@ -111,6 +113,7 @@ class SdSound : public Sound
 				// We have at least 2 bytes in the local buffer
 				sampleValue = *((int16_t *)(fileBuffer+fileBufferPosition));
 				fileBufferPosition += 2;
+				byteCount += 2;
 				return sampleValue;
 			}
 			else

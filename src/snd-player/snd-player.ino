@@ -157,6 +157,9 @@ struct EventConfig {
 	ConfigMode mode;
 	bool shuffle;
 	bool level;
+	size_t beginIndex;
+	size_t middleIndex;
+	size_t endIndex;
 };
 
 
@@ -325,7 +328,9 @@ void play(i2s_chan_handle_t i2s_handle)
 			wavSound = wavSoundNext.wav;  // Read the queue
 			seamlessPlay = wavSoundNext.seamlessPlay;
 			wavSoundNext.wav = NULL;  // Clear the queue
+digitalWrite(AUX5, 1);
 			wavSound->open();         // Open the sound
+digitalWrite(AUX5, 0);
 			if(wavSound->getSampleRate() == oldSampleRate)
 				playerState = PLAYER_PLAY;
 			else
@@ -339,6 +344,7 @@ void play(i2s_chan_handle_t i2s_handle)
 			i2s_channel_reconfig_std_clock(i2s_tx_handle, &clk_cfg);  // Reset sample rate
 			i2s_channel_enable(i2s_tx_handle);  // Enable I2S
 			digitalWrite(I2S_SD, 1);             // Enable amplifier
+			oldSampleRate = wavSound->getSampleRate();
 			playerState = PLAYER_PLAY;
 			break;
 
@@ -576,7 +582,25 @@ void findWavFiles(File *rootDir, String dirName, std::vector<Sound *> *soundsVec
 				Serial.print(wavData.wavDataSize);
 				Serial.print(",");
 				Serial.print(wavData.dataStartPosition);
-				Serial.println(")");
+				Serial.print(")");
+
+				if(!strcmp(wavFile.name(), "begin.wav"))
+				{
+					config->beginIndex = soundsVector->size();   // Current size will be index of the newly pushed object below
+					Serial.print(" - BME BEGIN");
+				}
+				else if(!strcmp(wavFile.name(), "middle.wav"))
+				{
+					config->middleIndex = soundsVector->size();   // Current size will be index of the newly pushed object below
+					Serial.print(" - BME MIDDLE");
+				}
+				else if(!strcmp(wavFile.name(), "end.wav"))
+				{
+					config->endIndex = soundsVector->size();   // Current size will be index of the newly pushed object below
+					Serial.print(" - BME END");
+				}
+
+				Serial.println("");
 
 				soundsVector->push_back(new SdSound(fullFileName.c_str(), wavData.wavDataSize, wavData.dataStartPosition, wavData.sampleRate));
 			}
@@ -618,6 +642,9 @@ void loop()
 		eventConfig[i].mode = MODE_ONESHOT;
 		eventConfig[i].shuffle = false;
 		eventConfig[i].level = false;
+		eventConfig[i].beginIndex = 0;
+		eventConfig[i].middleIndex = 0;
+		eventConfig[i].endIndex = 0;
 	}
 
 	typedef enum
@@ -629,6 +656,11 @@ void loop()
 		SOUNDPLAYER_AMBIENT_SILENCE,
 		SOUNDPLAYER_ONESHOT_QUEUE,
 		SOUNDPLAYER_ONESHOT_WAIT,
+		SOUNDPLAYER_BME_BEGIN,
+		SOUNDPLAYER_BME_WAIT1,
+		SOUNDPLAYER_BME_MIDDLE,
+		SOUNDPLAYER_BME_WAIT2,
+		SOUNDPLAYER_BME_END,
 	} SoundplayerState;
 
 	SoundplayerState state = SOUNDPLAYER_IDLE;
@@ -723,6 +755,29 @@ void loop()
 			}
 		}
 	}
+
+	Serial.println("");
+
+	for(i=0; i<4; i++)
+	{
+		Serial.print("Event ");
+		Serial.print(i);
+		Serial.print(" Mode: ");
+		switch(eventConfig[i].mode)
+		{
+			case MODE_ONESHOT:
+				Serial.println("One Shot");
+				break;
+			case MODE_CONTINUOUS:
+				Serial.println("Continuous");
+				break;
+			case MODE_BME:
+				Serial.println("Beginning-Middle-End");
+				break;
+		}
+	}
+
+	Serial.println("");
 
 	// Print configuration values
 	Serial.print("Volume: ");
@@ -959,6 +1014,10 @@ void loop()
 								{
 									state = SOUNDPLAYER_ONESHOT_QUEUE;
 								}
+								else if(MODE_BME == eventConfig[activeEvent].mode)
+								{
+									state = SOUNDPLAYER_BME_BEGIN;
+								}
 								break;
 							}
 						}
@@ -992,6 +1051,7 @@ void loop()
 				Serial.print("Queueing... ");
 				Serial.println(sampleNum);
 				wavSoundNext.wav = ambientSounds[sampleNum];
+				wavSoundNext.seamlessPlay = false;
 				lastSampleNum = sampleNum;
 				state = SOUNDPLAYER_AMBIENT_PLAY;
 				break;
@@ -1022,9 +1082,9 @@ void loop()
 
 			case SOUNDPLAYER_ONESHOT_QUEUE:
 				unmute = true;
-				Serial.print("Event ");
-				Serial.print(activeEvent);
-				Serial.println(" One Shot Mode");
+				Serial.print("\nEvent ");
+				Serial.print(activeEvent+1);
+				Serial.println(": One Shot Mode");
 				Serial.print("Heap free: ");
 				Serial.println(esp_get_free_heap_size());
 
@@ -1032,12 +1092,51 @@ void loop()
 				Serial.print("Queueing... ");
 				Serial.println(sampleNum);
 				wavSoundNext.wav = eventSounds[activeEvent][sampleNum];
+				wavSoundNext.seamlessPlay = false;
 				state = SOUNDPLAYER_ONESHOT_WAIT;
 				break;
 				
 			case SOUNDPLAYER_ONESHOT_WAIT:
 				if(PLAYER_IDLE == playerState)
 					state = SOUNDPLAYER_IDLE;
+				break;
+
+
+
+			case SOUNDPLAYER_BME_BEGIN:
+				unmute = true;
+				Serial.print("\nEvent ");
+				Serial.print(activeEvent+1);
+				Serial.println(": BME Mode");
+				Serial.print("Heap free: ");
+				Serial.println(esp_get_free_heap_size());
+
+				// Queue begin file.
+				wavSoundNext.wav = eventSounds[activeEvent][eventConfig[activeEvent].beginIndex];
+				wavSoundNext.seamlessPlay = true;
+				state = SOUNDPLAYER_BME_WAIT1;
+				break;
+			case SOUNDPLAYER_BME_WAIT1:
+				if(NULL == wavSoundNext.wav)
+					state = SOUNDPLAYER_BME_MIDDLE;
+				break;
+			case SOUNDPLAYER_BME_MIDDLE:
+				// Queue middle file.
+				wavSoundNext.wav = eventSounds[activeEvent][eventConfig[activeEvent].middleIndex];
+				wavSoundNext.seamlessPlay = true;
+				state = SOUNDPLAYER_BME_WAIT2;
+				break;
+			case SOUNDPLAYER_BME_WAIT2:
+				if((enableInput[activeEvent]) && (NULL == wavSoundNext.wav))
+					state = SOUNDPLAYER_BME_MIDDLE;
+				else if(!enableInput[activeEvent])
+					state = SOUNDPLAYER_BME_END;
+				break;
+			case SOUNDPLAYER_BME_END:
+				// Queue end file.  It's OK if this overwrites a queued middle since we now want it to end.
+				wavSoundNext.wav = eventSounds[activeEvent][eventConfig[activeEvent].endIndex];
+				wavSoundNext.seamlessPlay = true;
+				state = SOUNDPLAYER_IDLE;
 				break;
 		}
 
