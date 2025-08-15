@@ -628,6 +628,7 @@ void loop()
 		SOUNDPLAYER_AMBIENT_PLAY,
 		SOUNDPLAYER_AMBIENT_SILENCE,
 		SOUNDPLAYER_ONESHOT_QUEUE,
+		SOUNDPLAYER_ONESHOT_WAIT,
 	} SoundplayerState;
 
 	SoundplayerState state = SOUNDPLAYER_IDLE;
@@ -1031,7 +1032,12 @@ void loop()
 				Serial.print("Queueing... ");
 				Serial.println(sampleNum);
 				wavSoundNext.wav = eventSounds[activeEvent][sampleNum];
-				state = SOUNDPLAYER_IDLE;
+				state = SOUNDPLAYER_ONESHOT_WAIT;
+				break;
+				
+			case SOUNDPLAYER_ONESHOT_WAIT:
+				if(PLAYER_IDLE == playerState)
+					state = SOUNDPLAYER_IDLE;
 				break;
 		}
 
