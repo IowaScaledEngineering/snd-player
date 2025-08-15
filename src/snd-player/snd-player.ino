@@ -951,7 +951,7 @@ void loop()
 						for(i=0; i<4; i++)
 						{
 							// Find first input activated
-							if(enableInput[i] && (-1 == activeEvent))  // Don't retrigger until enable released (needed for one shot mode)
+							if(enableInput[i] && (-1 == activeEvent) && (eventSounds[i].size() > 0))  // Don't retrigger until enable released (needed for one shot mode)
 							{
 								activeEvent = i;
 								if(MODE_ONESHOT == eventConfig[activeEvent].mode)
