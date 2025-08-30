@@ -351,6 +351,7 @@ digitalWrite(AUX5, 0);
 		case PLAYER_PLAY:
 			if(stopPlayer)
 			{
+				stopPlayer = false;
 				playerState = PLAYER_FLUSH;
 			}
 			else if(wavSound->available())
@@ -438,7 +439,6 @@ digitalWrite(AUX4, 0);
 			digitalWrite(I2S_SD, 0);             // Disable amplifier
 			i2s_channel_disable(i2s_tx_handle);  // Disable I2S
 			oldSampleRate = 0;
-			stopPlayer = false;
 			playerState = PLAYER_IDLE;
 			break;
 	}
@@ -774,7 +774,12 @@ void loop()
 				Serial.println("One Shot");
 				break;
 			case MODE_CONTINUOUS:
-				Serial.println("Continuous");
+				Serial.print("Continuous");
+				if(eventConfig[i].level)
+					Serial.print(" Level");
+				if(eventConfig[i].shuffle)
+					Serial.print(" Shuffle");
+				Serial.println("");
 				break;
 			case MODE_BME:
 				Serial.println("Beginning-Middle-End");
@@ -1109,6 +1114,7 @@ void loop()
 
 			case SOUNDPLAYER_WAIT_FOR_END:
 				if(PLAYER_IDLE == playerState)
+Serial.print("D");
 					unmute = true;
 					state = SOUNDPLAYER_IDLE;
 				break;
@@ -1132,7 +1138,7 @@ void loop()
 				break;
 
 			case SOUNDPLAYER_CONTINUOUS_SAME:
-				Serial.print("Queueing... ");
+				Serial.print("Re-Queueing... ");
 				Serial.println(sampleNum);
 				wavSoundNext.wav = eventSounds[activeEvent][sampleNum];
 				wavSoundNext.seamlessPlay = false;
@@ -1145,6 +1151,7 @@ void loop()
 					// Enable still active
 					if(NULL == wavSoundNext.wav)
 					{
+Serial.print("A");
 						// Queue empty
 						if(eventConfig[activeEvent].shuffle)
 							state = SOUNDPLAYER_CONTINUOUS_RANDOM;
@@ -1154,6 +1161,7 @@ void loop()
 				}
 				else
 				{
+Serial.print("B");
 					// Enable not active
 					wavSoundNext.wav = NULL;  // Remove anything queued so it doesn't play
 					if(eventConfig[activeEvent].level)
@@ -1167,6 +1175,7 @@ void loop()
 				unmute = false;
 				if(0 == volume)
 				{
+Serial.print("C");
 					stopPlayer = true;
 					state = SOUNDPLAYER_WAIT_FOR_END;
 				}
