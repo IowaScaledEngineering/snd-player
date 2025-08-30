@@ -557,7 +557,7 @@ void findWavFiles(File *rootDir, String dirName, std::vector<Sound *> *soundsVec
 			{
 				config->mode = MODE_BME;
 			}
-			else if(0 == strcmp(wavFile.name(), "continous.opt"))
+			else if(0 == strcmp(wavFile.name(), "continuous.opt"))
 			{
 				config->mode = MODE_CONTINUOUS;
 			}
@@ -655,12 +655,17 @@ void loop()
 		SOUNDPLAYER_AMBIENT_PLAY,
 		SOUNDPLAYER_AMBIENT_SILENCE,
 		SOUNDPLAYER_ONESHOT_QUEUE,
-		SOUNDPLAYER_ONESHOT_WAIT,
+		SOUNDPLAYER_WAIT_FOR_END,
+		SOUNDPLAYER_CONTINUOUS_RANDOM,
+		SOUNDPLAYER_CONTINUOUS_SAME,
+		SOUNDPLAYER_CONTINUOUS_WAIT,
+		SOUNDPLAYER_CONTINUOUS_MUTE,
 		SOUNDPLAYER_BME_BEGIN,
 		SOUNDPLAYER_BME_WAIT1,
 		SOUNDPLAYER_BME_MIDDLE,
 		SOUNDPLAYER_BME_WAIT2,
 		SOUNDPLAYER_BME_END,
+		SOUNDPLAYER_BME_WAIT3,
 	} SoundplayerState;
 
 	SoundplayerState state = SOUNDPLAYER_IDLE;
@@ -1014,6 +1019,10 @@ void loop()
 								{
 									state = SOUNDPLAYER_ONESHOT_QUEUE;
 								}
+								else if(MODE_CONTINUOUS == eventConfig[activeEvent].mode)
+								{
+									state = SOUNDPLAYER_CONTINUOUS_RANDOM;
+								}
 								else if(MODE_BME == eventConfig[activeEvent].mode)
 								{
 									state = SOUNDPLAYER_BME_BEGIN;
@@ -1093,12 +1102,74 @@ void loop()
 				Serial.println(sampleNum);
 				wavSoundNext.wav = eventSounds[activeEvent][sampleNum];
 				wavSoundNext.seamlessPlay = false;
-				state = SOUNDPLAYER_ONESHOT_WAIT;
+				state = SOUNDPLAYER_WAIT_FOR_END;
 				break;
 				
-			case SOUNDPLAYER_ONESHOT_WAIT:
+
+
+			case SOUNDPLAYER_WAIT_FOR_END:
 				if(PLAYER_IDLE == playerState)
+					unmute = true;
 					state = SOUNDPLAYER_IDLE;
+				break;
+
+
+
+			case SOUNDPLAYER_CONTINUOUS_RANDOM:
+				unmute = true;
+				Serial.print("\nEvent ");
+				Serial.print(activeEvent+1);
+				Serial.println(": Continuous Mode");
+				Serial.print("Heap free: ");
+				Serial.println(esp_get_free_heap_size());
+
+				sampleNum = random(0, eventSounds[activeEvent].size());
+				Serial.print("Queueing... ");
+				Serial.println(sampleNum);
+				wavSoundNext.wav = eventSounds[activeEvent][sampleNum];
+				wavSoundNext.seamlessPlay = false;
+				state = SOUNDPLAYER_CONTINUOUS_WAIT;
+				break;
+
+			case SOUNDPLAYER_CONTINUOUS_SAME:
+				Serial.print("Queueing... ");
+				Serial.println(sampleNum);
+				wavSoundNext.wav = eventSounds[activeEvent][sampleNum];
+				wavSoundNext.seamlessPlay = false;
+				state = SOUNDPLAYER_CONTINUOUS_WAIT;
+				break;
+
+			case SOUNDPLAYER_CONTINUOUS_WAIT:
+				if(enableInput[activeEvent])
+				{
+					// Enable still active
+					if(NULL == wavSoundNext.wav)
+					{
+						// Queue empty
+						if(eventConfig[activeEvent].shuffle)
+							state = SOUNDPLAYER_CONTINUOUS_RANDOM;
+						else
+							state = SOUNDPLAYER_CONTINUOUS_SAME;
+					}
+				}
+				else
+				{
+					// Enable not active
+					wavSoundNext.wav = NULL;  // Remove anything queued so it doesn't play
+					if(eventConfig[activeEvent].level)
+						state = SOUNDPLAYER_CONTINUOUS_MUTE;
+					else
+						state = SOUNDPLAYER_WAIT_FOR_END;
+				}
+				break;
+
+			case SOUNDPLAYER_CONTINUOUS_MUTE:
+				unmute = false;
+				if(0 == volume)
+				{
+					stopPlayer = true;
+					state = SOUNDPLAYER_WAIT_FOR_END;
+				}
 				break;
 
 
@@ -1136,7 +1207,14 @@ void loop()
 				// Queue end file.  It's OK if this overwrites a queued middle since we now want it to end.
 				wavSoundNext.wav = eventSounds[activeEvent][eventConfig[activeEvent].endIndex];
 				wavSoundNext.seamlessPlay = true;
-				state = SOUNDPLAYER_IDLE;
+				state = SOUNDPLAYER_BME_WAIT3;
+				break;
+			case SOUNDPLAYER_BME_WAIT3:
+				// Wait until the end is playing
+				if(NULL == wavSoundNext.wav)
+				{
+					state = SOUNDPLAYER_WAIT_FOR_END;
+				}
 				break;
 		}
 
