@@ -626,7 +626,7 @@ void loop()
 	uint8_t inputStatus = 0;
 
 	uint32_t i;
-	int32_t activeEvent = -1;
+	uint32_t activeEvent;
 
 	uint8_t sampleNum;
 
@@ -656,6 +656,7 @@ void loop()
 		SOUNDPLAYER_AMBIENT_SILENCE,
 		SOUNDPLAYER_ONESHOT_QUEUE,
 		SOUNDPLAYER_WAIT_FOR_END,
+		SOUNDPLAYER_CONTINUOUS_INIT,
 		SOUNDPLAYER_CONTINUOUS_RANDOM,
 		SOUNDPLAYER_CONTINUOUS_SAME,
 		SOUNDPLAYER_CONTINUOUS_WAIT,
@@ -691,6 +692,11 @@ void loop()
 	silenceDecisecsMin = 0;
 	volumeUpCoef = 10;
 	volumeDownCoef = 8;
+
+	bool enableInput[4];
+	bool oldEnableInput[4] = {0};
+	bool risingInput[4];
+	bool enable;
 
 	esp_task_wdt_reset();
 
@@ -986,12 +992,20 @@ void loop()
 		}
 
 		// Figure out if any enable inputs are pressed and light LED
-		bool enableInput[4];
 		enableInput[0] = (buttonsPressed & (EN1_INPUT)) ? true : false;
 		enableInput[1] = (buttonsPressed & (EN2_INPUT)) ? true : false;
 		enableInput[2] = (buttonsPressed & (EN3_INPUT)) ? true : false;
 		enableInput[3] = (buttonsPressed & (EN4_INPUT)) ? true : false;
-		bool enable = enableInput[0] || enableInput[1] || enableInput[2] || enableInput[3];
+		enable = enableInput[0] || enableInput[1] || enableInput[2] || enableInput[3];
+
+		for(i=0; i<4; i++)
+		{
+			if( (1 == enableInput[i]) && (0 == oldEnableInput[i]) )
+				risingInput[i] = true;
+			else
+				risingInput[i] = false;
+			oldEnableInput[i] = enableInput[i];
+		}
 
 		if(enable)
 		{
@@ -1017,28 +1031,26 @@ void loop()
 						for(i=0; i<4; i++)
 						{
 							// Find first input activated
-							if(enableInput[i] && (-1 == activeEvent) && (eventSounds[i].size() > 0))  // Don't retrigger until enable released (needed for one shot mode)
+							if(enableInput[i] && (eventSounds[i].size() > 0))
 							{
-								activeEvent = i;
-								if(MODE_ONESHOT == eventConfig[activeEvent].mode)
+								if( (risingInput[i]) && (MODE_ONESHOT == eventConfig[i].mode))
 								{
+									activeEvent = i;
 									state = SOUNDPLAYER_ONESHOT_QUEUE;
 								}
-								else if(MODE_CONTINUOUS == eventConfig[activeEvent].mode)
+								else if(MODE_CONTINUOUS == eventConfig[i].mode)
 								{
-									state = SOUNDPLAYER_CONTINUOUS_RANDOM;
+									activeEvent = i;
+									state = SOUNDPLAYER_CONTINUOUS_INIT;
 								}
-								else if(MODE_BME == eventConfig[activeEvent].mode)
+								else if(MODE_BME == eventConfig[i].mode)
 								{
+									activeEvent = i;
 									state = SOUNDPLAYER_BME_BEGIN;
 								}
-								break;
+								break;  // Exit for loop
 							}
 						}
-					}
-					else
-					{
-						activeEvent = -1;
 					}
 				}
 				break;
@@ -1114,26 +1126,41 @@ void loop()
 
 			case SOUNDPLAYER_WAIT_FOR_END:
 				if(PLAYER_IDLE == playerState)
-Serial.print("D");
+				{
 					unmute = true;
 					state = SOUNDPLAYER_IDLE;
+				}
 				break;
 
 
 
-			case SOUNDPLAYER_CONTINUOUS_RANDOM:
+			case SOUNDPLAYER_CONTINUOUS_INIT:
 				unmute = true;
 				Serial.print("\nEvent ");
 				Serial.print(activeEvent+1);
 				Serial.println(": Continuous Mode");
 				Serial.print("Heap free: ");
 				Serial.println(esp_get_free_heap_size());
+				state = SOUNDPLAYER_CONTINUOUS_RANDOM;
+				break;
 
+			case SOUNDPLAYER_CONTINUOUS_RANDOM:
 				sampleNum = random(0, eventSounds[activeEvent].size());
+				if(eventSounds[activeEvent].size() > 2)
+				{
+					// With three or more sounds, don't repeat the last one
+					while(sampleNum == lastSampleNum)
+					{
+						esp_task_wdt_reset();
+						sampleNum = random(0, eventSounds[activeEvent].size());
+						Serial.println("*");
+					}
+				}
 				Serial.print("Queueing... ");
 				Serial.println(sampleNum);
 				wavSoundNext.wav = eventSounds[activeEvent][sampleNum];
 				wavSoundNext.seamlessPlay = false;
+				lastSampleNum = sampleNum;
 				state = SOUNDPLAYER_CONTINUOUS_WAIT;
 				break;
 
@@ -1151,7 +1178,6 @@ Serial.print("D");
 					// Enable still active
 					if(NULL == wavSoundNext.wav)
 					{
-Serial.print("A");
 						// Queue empty
 						if(eventConfig[activeEvent].shuffle)
 							state = SOUNDPLAYER_CONTINUOUS_RANDOM;
@@ -1161,7 +1187,6 @@ Serial.print("A");
 				}
 				else
 				{
-Serial.print("B");
 					// Enable not active
 					wavSoundNext.wav = NULL;  // Remove anything queued so it doesn't play
 					if(eventConfig[activeEvent].level)
@@ -1175,7 +1200,6 @@ Serial.print("B");
 				unmute = false;
 				if(0 == volume)
 				{
-Serial.print("C");
 					stopPlayer = true;
 					state = SOUNDPLAYER_WAIT_FOR_END;
 				}
