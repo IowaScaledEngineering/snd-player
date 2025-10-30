@@ -157,9 +157,8 @@ struct EventConfig {
 	ConfigMode mode;
 	bool shuffle;
 	bool level;
-	size_t beginIndex;
-	size_t middleIndex;
-	size_t endIndex;
+	int32_t beginIndex;
+	int32_t endIndex;
 };
 
 
@@ -589,11 +588,6 @@ void findWavFiles(File *rootDir, String dirName, std::vector<Sound *> *soundsVec
 					config->beginIndex = soundsVector->size();   // Current size will be index of the newly pushed object below
 					Serial.print(" - BME BEGIN");
 				}
-				else if(!strcmp(wavFile.name(), "middle.wav"))
-				{
-					config->middleIndex = soundsVector->size();   // Current size will be index of the newly pushed object below
-					Serial.print(" - BME MIDDLE");
-				}
 				else if(!strcmp(wavFile.name(), "end.wav"))
 				{
 					config->endIndex = soundsVector->size();   // Current size will be index of the newly pushed object below
@@ -614,7 +608,7 @@ void loop()
 {
 	File rootDir;
 
-	uint8_t lastSampleNum = 255;   // Have to initialize to something, so will never play sample 255 first, Can't be zero since it would never play anything with a single sample
+	uint32_t lastSampleNum = UINT32_MAX;   // Have to initialize to something, so will never play UINT32_MAX samples first, can't be zero since it would never play anything with a single sample
 
 	uint32_t silenceDecisecs;
 	unsigned long silenceStart;
@@ -628,7 +622,7 @@ void loop()
 	uint32_t i;
 	uint32_t activeEvent;
 
-	uint8_t sampleNum;
+	uint32_t sampleNum;
 
 	std::vector<Sound *> ambientSounds;
 	std::vector<Sound *> eventSounds[4];
@@ -642,9 +636,8 @@ void loop()
 		eventConfig[i].mode = MODE_ONESHOT;
 		eventConfig[i].shuffle = false;
 		eventConfig[i].level = false;
-		eventConfig[i].beginIndex = 0;
-		eventConfig[i].middleIndex = 0;
-		eventConfig[i].endIndex = 0;
+		eventConfig[i].beginIndex = -1;
+		eventConfig[i].endIndex = -1;
 	}
 
 	typedef enum
@@ -1141,6 +1134,7 @@ void loop()
 				Serial.println(": Continuous Mode");
 				Serial.print("Heap free: ");
 				Serial.println(esp_get_free_heap_size());
+				lastSampleNum = UINT32_MAX;
 				state = SOUNDPLAYER_CONTINUOUS_RANDOM;
 				break;
 
@@ -1189,6 +1183,7 @@ void loop()
 				{
 					// Enable not active
 					wavSoundNext.wav = NULL;  // Remove anything queued so it doesn't play
+					lastSampleNum = UINT32_MAX;
 					if(eventConfig[activeEvent].level)
 						state = SOUNDPLAYER_CONTINUOUS_MUTE;
 					else
@@ -1215,9 +1210,12 @@ void loop()
 				Serial.print("Heap free: ");
 				Serial.println(esp_get_free_heap_size());
 
-				// Queue begin file.
-				wavSoundNext.wav = eventSounds[activeEvent][eventConfig[activeEvent].beginIndex];
-				wavSoundNext.seamlessPlay = true;
+				// Queue begin file if one exists
+				if(eventConfig[activeEvent].beginIndex >= 0)
+				{
+					wavSoundNext.wav = eventSounds[activeEvent][eventConfig[activeEvent].beginIndex];
+					wavSoundNext.seamlessPlay = true;
+				}
 				state = SOUNDPLAYER_BME_WAIT1;
 				break;
 			case SOUNDPLAYER_BME_WAIT1:
@@ -1226,7 +1224,42 @@ void loop()
 				break;
 			case SOUNDPLAYER_BME_MIDDLE:
 				// Queue middle file.
-				wavSoundNext.wav = eventSounds[activeEvent][eventConfig[activeEvent].middleIndex];
+				i = eventSounds[activeEvent].size();
+				Serial.println(i);
+				if(eventConfig[activeEvent].beginIndex >= 0)
+				{
+					// Valid begin sound
+					i--;
+				}
+				if(eventConfig[activeEvent].endIndex >= 0)
+				{
+					// Valid end sound
+					i--;
+				}
+				Serial.println(i);
+				
+				sampleNum = random(0, i);
+				Serial.println(sampleNum);
+				
+				if((eventConfig[activeEvent].beginIndex >= 0) && (sampleNum >= eventConfig[activeEvent].beginIndex))
+				{
+					// Skip begin sound
+					sampleNum++;
+					// Check that it isn't now the end sound
+					if(sampleNum >= eventConfig[activeEvent].endIndex)
+						sampleNum++;
+				}
+				else if((eventConfig[activeEvent].endIndex >= 0) && (sampleNum >= eventConfig[activeEvent].endIndex))
+				{
+					// Skip end sound
+					sampleNum++;
+					// Check that it isn't now the begin sound
+					if(sampleNum >= eventConfig[activeEvent].beginIndex)
+						sampleNum++;
+				}
+				Serial.println(sampleNum);
+				
+				wavSoundNext.wav = eventSounds[activeEvent][sampleNum];
 				wavSoundNext.seamlessPlay = true;
 				state = SOUNDPLAYER_BME_WAIT2;
 				break;
@@ -1237,9 +1270,12 @@ void loop()
 					state = SOUNDPLAYER_BME_END;
 				break;
 			case SOUNDPLAYER_BME_END:
-				// Queue end file.  It's OK if this overwrites a queued middle since we now want it to end.
-				wavSoundNext.wav = eventSounds[activeEvent][eventConfig[activeEvent].endIndex];
-				wavSoundNext.seamlessPlay = true;
+				// Queue end file if it exists.  It's OK if this overwrites a queued middle since we now want it to end.
+				if(eventConfig[activeEvent].endIndex >= 0)
+				{
+					wavSoundNext.wav = eventSounds[activeEvent][eventConfig[activeEvent].endIndex];
+					wavSoundNext.seamlessPlay = true;
+				}
 				state = SOUNDPLAYER_BME_WAIT3;
 				break;
 			case SOUNDPLAYER_BME_WAIT3:
