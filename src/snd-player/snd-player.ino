@@ -741,7 +741,8 @@ void loop()
 				ambientMode = true;
 			}
 		}
-		else
+
+		if(!ambientMode)
 		{
 			// Not ambient mode, check event directories
 			ambientMode = false;
