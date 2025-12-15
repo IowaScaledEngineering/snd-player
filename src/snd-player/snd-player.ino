@@ -40,23 +40,23 @@ LICENSE:
 i2s_chan_handle_t i2s_tx_handle;
 
 // Pins
-#define EN1         9
-#define EN2        10
-#define EN3         3
-#define EN4        21
-#define LEDA       11
-#define LEDB       12
-#define VOLDN      13
-#define VOLUP      14
-#define AUX1       15
-#define AUX2       16
-#define AUX3       17
-#define AUX4       18
-#define AUX5        8
-#define I2S_SD      4
-#define I2S_DOUT    GPIO_NUM_5
-#define I2S_BCLK    GPIO_NUM_6
-#define I2S_LRCLK   GPIO_NUM_7
+#define EN1        GPIO_NUM_9
+#define EN2        GPIO_NUM_10
+#define EN3        GPIO_NUM_3
+#define EN4        GPIO_NUM_21
+#define LEDA       GPIO_NUM_11
+#define LEDB       GPIO_NUM_12
+#define VOLDN      GPIO_NUM_13
+#define VOLUP      GPIO_NUM_14
+#define AUX1       GPIO_NUM_15
+#define AUX2       GPIO_NUM_16
+#define AUX3       GPIO_NUM_17
+#define AUX4       GPIO_NUM_18
+#define AUX5       GPIO_NUM_8
+#define I2S_SD     GPIO_NUM_4
+#define I2S_DOUT   GPIO_NUM_5
+#define I2S_BCLK   GPIO_NUM_6
+#define I2S_LRCLK  GPIO_NUM_7
 #define SDCLK      36
 #define SDMOSI     35
 #define SDMISO     37
@@ -260,12 +260,12 @@ void setup()
 	pinMode(VOLDN, INPUT_PULLUP);
 	pinMode(VOLUP, INPUT_PULLUP);
 	pinMode(I2S_SD, OUTPUT);
-	digitalWrite(I2S_SD, 0);	// Disable amplifier
+	gpio_set_level(I2S_SD, 0);	// Disable amplifier
 
 	pinMode(LEDA, OUTPUT);
 	pinMode(LEDB, OUTPUT);
-	digitalWrite(LEDA, 0);
-	digitalWrite(LEDB, 0);
+	gpio_set_level(LEDA, 0);
+	gpio_set_level(LEDB, 0);
 
 	pinMode(EN1, INPUT_PULLUP);
 	pinMode(EN2, INPUT_PULLUP);
@@ -327,9 +327,9 @@ void play(i2s_chan_handle_t i2s_handle)
 			wavSound = wavSoundNext.wav;  // Read the queue
 			seamlessPlay = wavSoundNext.seamlessPlay;
 			wavSoundNext.wav = NULL;  // Clear the queue
-digitalWrite(AUX5, 1);
+//gpio_set_level(AUX5, 1);
 			wavSound->open();         // Open the sound
-digitalWrite(AUX5, 0);
+//gpio_set_level(AUX5, 0);
 			if(wavSound->getSampleRate() == oldSampleRate)
 				playerState = PLAYER_PLAY;
 			else
@@ -338,11 +338,11 @@ digitalWrite(AUX5, 0);
 
 		case PLAYER_RECONFIGURE:
 			clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(wavSound->getSampleRate());
-			digitalWrite(I2S_SD, 0);             // Disable amplifier
+			gpio_set_level(I2S_SD, 0);             // Disable amplifier
 			i2s_channel_disable(i2s_tx_handle);  // Disable I2S
 			i2s_channel_reconfig_std_clock(i2s_tx_handle, &clk_cfg);  // Reset sample rate
 			i2s_channel_enable(i2s_tx_handle);  // Enable I2S
-			digitalWrite(I2S_SD, 1);             // Enable amplifier
+			gpio_set_level(I2S_SD, 1);             // Enable amplifier
 			oldSampleRate = wavSound->getSampleRate();
 			playerState = PLAYER_PLAY;
 			break;
@@ -356,9 +356,9 @@ digitalWrite(AUX5, 0);
 			else if(wavSound->available())
 			{
 				// Sound not done, more samples available
-digitalWrite(AUX2, 1);
+//gpio_set_level(AUX2, 1);
 				sampleValue = wavSound->getNextSample();
-digitalWrite(AUX2, 0);
+//gpio_set_level(AUX2, 0);
 				int32_t adjustedValue = sampleValue * volume / volumeLevels[VOL_STEP_NOM];
 				if(adjustedValue > 32767)
 					sampleValue = 32767;
@@ -368,14 +368,14 @@ digitalWrite(AUX2, 0);
 					sampleValue = adjustedValue;
 				// Combine into 32 bit word (left & right)
 				outputValue = (sampleValue<<16) | (sampleValue & 0xffff);
-digitalWrite(AUX3, 1);
+//gpio_set_level(AUX3, 1);
 				i2s_channel_write(i2s_handle, &outputValue, 4, &bytesWritten, 1);
 				if(0 == bytesWritten)
 				{
 					// Sample rejected, DMA buffer full
 					playerState = PLAYER_RETRY;
 				}
-digitalWrite(AUX3, 0);
+//gpio_set_level(AUX3, 0);
 			}
 			else
 			{
@@ -395,13 +395,13 @@ digitalWrite(AUX3, 0);
 			break;
 
 		case PLAYER_RETRY:
-digitalWrite(AUX4, 1);
+//gpio_set_level(AUX4, 1);
 			i2s_channel_write(i2s_handle, &outputValue, 4, &bytesWritten, 1);
 			if(0 == bytesWritten)
 				playerState = PLAYER_RETRY;
 			else
 				playerState = PLAYER_PLAY;
-digitalWrite(AUX4, 0);
+//gpio_set_level(AUX4, 0);
 			break;
 
 		case PLAYER_FLUSH:
@@ -435,7 +435,7 @@ digitalWrite(AUX4, 0);
 			break;
 		
 		case PLAYER_RESET:
-			digitalWrite(I2S_SD, 0);             // Disable amplifier
+			gpio_set_level(I2S_SD, 0);             // Disable amplifier
 			i2s_channel_disable(i2s_tx_handle);  // Disable I2S
 			oldSampleRate = 0;
 			playerState = PLAYER_IDLE;
@@ -813,13 +813,13 @@ void loop()
 		Serial.print(ambientSounds.size() + eventSounds[0].size() + eventSounds[1].size() + eventSounds[2].size() + eventSounds[3].size());
 		Serial.println(")");
 		// Quadruple blink blue
-		digitalWrite(LEDA, 1); delay(250); digitalWrite(LEDA, 0); delay(250);
+		gpio_set_level(LEDA, 1); delay(250); gpio_set_level(LEDA, 0); delay(250);
 		esp_task_wdt_reset();
-		digitalWrite(LEDA, 1); delay(250); digitalWrite(LEDA, 0); delay(250);
+		gpio_set_level(LEDA, 1); delay(250); gpio_set_level(LEDA, 0); delay(250);
 		esp_task_wdt_reset();
-		digitalWrite(LEDA, 1); delay(250); digitalWrite(LEDA, 0); delay(250);
+		gpio_set_level(LEDA, 1); delay(250); gpio_set_level(LEDA, 0); delay(250);
 		esp_task_wdt_reset();
-		digitalWrite(LEDA, 1); delay(250); digitalWrite(LEDA, 0); delay(250);
+		gpio_set_level(LEDA, 1); delay(250); gpio_set_level(LEDA, 0); delay(250);
 		esp_task_wdt_reset();
 	}
 	else
@@ -828,9 +828,9 @@ void loop()
 		// Blink blue / orange
 		while(1)
 		{
-			digitalWrite(LEDA, 1); delay(100); digitalWrite(LEDA, 0);
+			gpio_set_level(LEDA, 1); delay(100); gpio_set_level(LEDA, 0);
 			esp_task_wdt_reset();
-			digitalWrite(LEDB, 1); delay(100); digitalWrite(LEDB, 0);
+			gpio_set_level(LEDB, 1); delay(100); gpio_set_level(LEDB, 0);
 			esp_task_wdt_reset();
 		}
 	}
@@ -866,39 +866,39 @@ void loop()
 	Serial.print("DMA buffer size: ");
 	Serial.println(dmaBufferSize);
 
-	digitalWrite(I2S_SD, 1);	// Enable amplifier
+	gpio_set_level(I2S_SD, 1);	// Enable amplifier
 
 	while(1)
 	{
 		esp_task_wdt_reset();
 
 		// Read inputs
-		if(digitalRead(VOLUP))
+		if(gpio_get_level(VOLUP))
 			inputStatus &= ~VOL_UP_BUTTON;
 		else
 			inputStatus |= VOL_UP_BUTTON;
 
-		if(digitalRead(VOLDN))
+		if(gpio_get_level(VOLDN))
 			inputStatus &= ~VOL_DN_BUTTON;
 		else
 			inputStatus |= VOL_DN_BUTTON;
 
-		if(digitalRead(EN1))
+		if(gpio_get_level(EN1))
 			inputStatus &= ~EN1_INPUT;
 		else
 			inputStatus |= EN1_INPUT;
 
-		if(digitalRead(EN2))
+		if(gpio_get_level(EN2))
 			inputStatus &= ~EN2_INPUT;
 		else
 			inputStatus |= EN2_INPUT;
 
-		if(digitalRead(EN3))
+		if(gpio_get_level(EN3))
 			inputStatus &= ~EN3_INPUT;
 		else
 			inputStatus |= EN3_INPUT;
 
-		if(digitalRead(EN4))
+		if(gpio_get_level(EN4))
 			inputStatus &= ~EN4_INPUT;
 		else
 			inputStatus |= EN4_INPUT;
@@ -933,10 +933,12 @@ void loop()
 		}
 
 		// Turn off volume LED
+gpio_set_level(AUX2, 1);
+gpio_set_level(AUX2, 0);
 		uint16_t ledHoldTime = (VOL_STEP_NOM == volumeStep) ? 1000 : 100;
 		if((millis() - pressTime) > ledHoldTime)
 		{
-			digitalWrite(LEDB, 0);
+			gpio_set_level(LEDB, 0);
 		}
 
 		// Find rising edge of volume up button
@@ -950,7 +952,7 @@ void loop()
 			}
 			Serial.print("Vol Up: ");
 			Serial.println(volumeStep);
-			digitalWrite(LEDB, 1);
+			gpio_set_level(LEDB, 1);
 		}
 
 		// Find rising edge of volume down button
@@ -964,7 +966,7 @@ void loop()
 			}
 			Serial.print("Vol Dn: ");
 			Serial.println(volumeStep);
-			digitalWrite(LEDB, 1);
+			gpio_set_level(LEDB, 1);
 		}
 
 		oldButtonsPressed = buttonsPressed;
@@ -1003,11 +1005,11 @@ void loop()
 
 		if(enable)
 		{
-			digitalWrite(LEDA, 1);
+			gpio_set_level(LEDA, 1);
 		}
 		else
 		{
-			digitalWrite(LEDA, 0);
+			gpio_set_level(LEDA, 0);
 		}
 
 		switch(state)
@@ -1289,10 +1291,10 @@ void loop()
 		}
 
 
-digitalWrite(AUX1, 1);
+gpio_set_level(AUX1, 1);
 		// Pump the sound player
 		play(i2s_tx_handle);
-digitalWrite(AUX1, 0);
+gpio_set_level(AUX1, 0);
 
 
 		if(restart)
@@ -1310,7 +1312,7 @@ digitalWrite(AUX1, 0);
 	}
 
 	// Never get here but this is what we would do to clean up
-	digitalWrite(I2S_SD, 0);	// Disable amplifier
+	gpio_set_level(I2S_SD, 0);	// Disable amplifier
 	i2s_channel_disable(i2s_tx_handle);
 	i2s_del_channel(i2s_tx_handle);
 }
