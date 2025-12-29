@@ -334,6 +334,7 @@ void play(i2s_chan_handle_t i2s_handle)
 				playerState = PLAYER_PLAY;
 			else
 				playerState = PLAYER_RECONFIGURE;
+			stopPlayer = false;  // Needed here in case we run out of samples before muting is complete
 			break;
 
 		case PLAYER_RECONFIGURE:
