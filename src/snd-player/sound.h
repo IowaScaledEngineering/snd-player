@@ -1,11 +1,11 @@
 /*************************************************************************
-Title:    Sound Player
+Title:    Sound Functions
 Authors:  Michael Petersen <railfan@drgw.net>
 File:     sound.h
 License:  GNU General Public License v3
 
 LICENSE:
-    Copyright (C) 2024 Michael Petersen
+    Copyright (C) 2025 Michael Petersen
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -21,6 +21,8 @@ LICENSE:
 
 #pragma once
 
+#include <SD.h>
+
 #define FILE_BUFFER_SIZE 2048
 
 class Sound
@@ -31,6 +33,9 @@ class Sound
 		uint32_t sampleRate;
 
 	public:
+		virtual ~Sound()
+		{
+		}
 		virtual void open(void);
 		virtual size_t available(void)
 		{
@@ -39,7 +44,6 @@ class Sound
 			else
 				return 0;
 		}
-		virtual size_t read(uint8_t *buffer, size_t numBytes);
 		virtual int16_t getNextSample(void);
 		virtual void close(void);
 		uint32_t getSampleRate(void)
@@ -103,7 +107,9 @@ class SdSound : public Sound
 				{
 					bytesToRead = FILE_BUFFER_SIZE;
 				}
+				gpio_set_level(AUX5, 1);  ///////////////////////////////////////////////////////////////////////////////////////////
 				bytesRead = wavFile.read(fileBuffer, bytesToRead);
+				gpio_set_level(AUX5, 0);  ///////////////////////////////////////////////////////////////////////////////////////////
 				fileBufferLength = bytesRead;
 				fileBufferPosition = 0;
 			}
@@ -121,18 +127,6 @@ class SdSound : public Sound
 				// We got called even though there was nothing to send
 				return 0;
 			}
-		}
-		size_t read(uint8_t *buffer, size_t numBytes)
-		{
-			size_t bytesToRead, bytesRead;
-			if(available() < numBytes)
-				bytesToRead = available();
-			else
-				bytesToRead = numBytes;
-
-			bytesRead = wavFile.read(buffer, bytesToRead);
-			byteCount += bytesRead;
-			return bytesRead;
 		}
 		void close(void)
 		{
@@ -176,17 +170,6 @@ class MemSound : public Sound
 			{
 				return 0;
 			}
-		}
-		size_t read(uint8_t *buffer, size_t numBytes)
-		{
-			size_t bytesToRead;
-			if(available() < numBytes)
-				bytesToRead = available();
-			else
-				bytesToRead = numBytes;
-			memcpy(buffer, dataPtr+byteCount, bytesToRead);
-			byteCount += bytesToRead;
-			return bytesToRead;
 		}
 		void close(void)
 		{
