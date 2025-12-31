@@ -35,6 +35,8 @@ LICENSE:
 
 i2s_chan_handle_t i2s_tx_handle;
 
+QueueHandle_t wavSoundQueue;
+
 typedef enum
 {
 	PLAYER_IDLE,
@@ -88,8 +90,6 @@ uint16_t volumeLevels[] = {
 		19000,
 		20000,  // 30
 };
-
-struct WavSound wavSoundNext;
 
 uint32_t dmaBufferSize;
 
@@ -185,8 +185,7 @@ static void audioPump(void *args)
 	size_t bytesWritten;
 	i2s_std_clk_config_t clk_cfg;
 	uint32_t outputValue;
-	Sound *wavSound = NULL;
-	bool seamlessPlay = false;
+	WavSound wavSound;
 	uint32_t oldSampleRate = 0;
 	uint32_t flushCount = 0;
 	unsigned long timeoutTimer;
@@ -198,7 +197,7 @@ static void audioPump(void *args)
 		switch(playerState)
 		{
 			case PLAYER_IDLE:
-				if(NULL != wavSoundNext.wav)
+				if(0 != uxQueueMessagesWaiting(wavSoundQueue))
 				{
 					// Queue not empty
 					playerState = PLAYER_INIT;
@@ -206,25 +205,25 @@ static void audioPump(void *args)
 				break;
 
 			case PLAYER_INIT:
-				wavSound = wavSoundNext.wav;  // Read the queue
-				seamlessPlay = wavSoundNext.seamlessPlay;
-				wavSoundNext.wav = NULL;  // Clear the queue
-				wavSound->open();         // Open the sound
-				if(wavSound->getSampleRate() == oldSampleRate)
-					playerState = PLAYER_PLAY;
-				else
-					playerState = PLAYER_RECONFIGURE;
-				stopPlayer = false;  // Needed here in case we run out of samples before muting is complete
+				if(xQueueReceive(wavSoundQueue, &wavSound, portMAX_DELAY))  // Should only get here when there is something in the queue, so portMAX_DELAY is fine
+				{
+					wavSound.wav->open();         // Open the sound
+					if(wavSound.wav->getSampleRate() == oldSampleRate)
+						playerState = PLAYER_PLAY;
+					else
+						playerState = PLAYER_RECONFIGURE;
+					stopPlayer = false;  // Needed here in case we run out of samples before muting is complete
+				}
 				break;
 
 			case PLAYER_RECONFIGURE:
-				clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(wavSound->getSampleRate());
+				clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(wavSound.wav->getSampleRate());
 				gpio_set_level(I2S_SD, 0);             // Disable amplifier
 				i2s_channel_disable(i2s_tx_handle);  // Disable I2S
 				i2s_channel_reconfig_std_clock(i2s_tx_handle, &clk_cfg);  // Reset sample rate
 				i2s_channel_enable(i2s_tx_handle);  // Enable I2S
 				gpio_set_level(I2S_SD, 1);             // Enable amplifier
-				oldSampleRate = wavSound->getSampleRate();
+				oldSampleRate = wavSound.wav->getSampleRate();
 				playerState = PLAYER_PLAY;
 				break;
 
@@ -234,12 +233,12 @@ static void audioPump(void *args)
 					stopPlayer = false;
 					playerState = PLAYER_FLUSH;
 				}
-				else if(wavSound->available())
+				else if(wavSound.wav->available())
 				{
 					// Sound not done, more samples available
 					gpio_set_level(AUX2, 1);  ///////////////////////////////////////////////////////////////////////////////////////////
 					timeoutTimer = millis();
-					sampleValue = wavSound->getNextSample();
+					sampleValue = wavSound.wav->getNextSample();
 					if(millis() > timeoutTimer + 150)
 					{
 						// Getting the next sample took longer than 150ms (5760 bytes @ 44.1kHz = 130ms) so something is wrong (mostly likely the card was removed)
@@ -263,8 +262,8 @@ static void audioPump(void *args)
 				else
 				{
 					// Sound done, no samples available
-					wavSound->close();
-					if((NULL != wavSoundNext.wav) && (seamlessPlay))
+					wavSound.wav->close();
+					if((uxQueueMessagesWaiting(wavSoundQueue)) && (wavSound.seamlessPlay))
 					{
 						// Queue not empty and seamless playing, so grab next
 						playerState = PLAYER_INIT;
@@ -304,8 +303,8 @@ static void audioPump(void *args)
 
 		if(killPlayer)
 		{
-			if(NULL != wavSound)
-				wavSound->close();
+			if(NULL != wavSound.wav)
+				wavSound.wav->close();
 			killPlayer = false;
 			break;
 		}
@@ -325,8 +324,7 @@ void audioInit(void)
 	pinMode(I2S_SD, OUTPUT);
 	gpio_set_level(I2S_SD, 0);	// Disable amplifier
 
-	wavSoundNext.wav = NULL;
-	wavSoundNext.seamlessPlay = false;
+	wavSoundQueue = xQueueCreate(1, sizeof(WavSound));
 
 	// Default dma_frame_num = 240, dma_desc_num = 6 (i2s_common.h)
 	//    Total DMA size = 240 * 6 * 2 * 16 / 8 = 5760 bytes

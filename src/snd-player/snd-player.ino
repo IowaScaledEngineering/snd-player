@@ -45,7 +45,7 @@ LICENSE:
 
 uint8_t volumeStep = VOL_STEP_NOM;
 
-extern struct WavSound wavSoundNext;
+extern QueueHandle_t wavSoundQueue;
 
 bool restart = false;
 
@@ -387,14 +387,14 @@ void loop()
 	unsigned long sdDetectTime = 0;
 
 	uint32_t i, j;
-	uint32_t activeEvent;
+	uint32_t activeEvent = 0;
 
 	uint32_t sampleNum;
 
 	std::vector<Sound *> ambientSounds;
 	std::vector<Sound *> eventSounds[4];
-	wavSoundNext.wav = NULL;
-	wavSoundNext.seamlessPlay = false;
+
+	WavSound wavSound;
 
 	EventConfig ambientConfig;  // not used, but needed for symmetry with other events
 	EventConfig eventConfig[4];
@@ -673,7 +673,20 @@ void loop()
 		}
 
 		// Turn off volume LED
-		uint16_t ledHoldTime = (VOL_STEP_NOM == volumeStep) ? 1000 : 100;
+		uint16_t ledHoldTime;
+		switch(volumeStep)
+		{
+			case 0:
+			case VOL_STEP_MAX:
+				ledHoldTime = 50;
+				break;
+			case VOL_STEP_NOM:
+				ledHoldTime = 1000;
+				break;
+			default:
+				ledHoldTime = 100;
+				break;
+		}
 		if(millis() > pressTime + ledHoldTime)
 		{
 			gpio_set_level(LEDB, 0);
@@ -681,7 +694,7 @@ void loop()
 
 		if( (0 == volumeStep) || (VOL_STEP_MAX == volumeStep) )
 		{
-			if((millis() > pressTime + 2*ledHoldTime) && (blinkCount < 2))
+			if((millis() > pressTime + 2*ledHoldTime) && (blinkCount < 4))
 			{
 				pressTime = millis();  // Trigger another blink
 				gpio_set_level(LEDB, 1);
@@ -808,7 +821,7 @@ void loop()
 				state = SOUNDPLAYER_AMBIENT_QUEUE;
 				break;
 			case SOUNDPLAYER_AMBIENT_QUEUE:
-				if(NULL == wavSoundNext.wav)
+				if(0 == uxQueueMessagesWaiting(wavSoundQueue))
 				{
 					printMemoryUsage();
 
@@ -825,8 +838,9 @@ void loop()
 					}
 					Serial.print("Queueing... ");
 					Serial.println(sampleNum);
-					wavSoundNext.wav = ambientSounds[sampleNum];
-					wavSoundNext.seamlessPlay = false;
+					wavSound.wav = ambientSounds[sampleNum];
+					wavSound.seamlessPlay = false;
+					xQueueSend(wavSoundQueue, &wavSound, portMAX_DELAY);
 					lastSampleNum = sampleNum;
 					state = SOUNDPLAYER_AMBIENT_PLAY_WAIT;
 				}
@@ -879,8 +893,9 @@ void loop()
 				sampleNum = random(0, eventSounds[activeEvent].size());
 				Serial.print("Queueing... ");
 				Serial.println(sampleNum);
-				wavSoundNext.wav = eventSounds[activeEvent][sampleNum];
-				wavSoundNext.seamlessPlay = false;
+				wavSound.wav = eventSounds[activeEvent][sampleNum];
+				wavSound.seamlessPlay = false;
+				xQueueSend(wavSoundQueue, &wavSound, portMAX_DELAY);
 				state = SOUNDPLAYER_WAIT_FOR_END;
 				break;
 				
@@ -920,8 +935,9 @@ void loop()
 				}
 				Serial.print("Queueing... ");
 				Serial.println(sampleNum);
-				wavSoundNext.wav = eventSounds[activeEvent][sampleNum];
-				wavSoundNext.seamlessPlay = false;
+				wavSound.wav = eventSounds[activeEvent][sampleNum];
+				wavSound.seamlessPlay = false;
+				xQueueSend(wavSoundQueue, &wavSound, portMAX_DELAY);
 				lastSampleNum = sampleNum;
 				state = SOUNDPLAYER_CONTINUOUS_WAIT;
 				break;
@@ -929,8 +945,9 @@ void loop()
 			case SOUNDPLAYER_CONTINUOUS_SAME:
 				Serial.print("Re-Queueing... ");
 				Serial.println(sampleNum);
-				wavSoundNext.wav = eventSounds[activeEvent][sampleNum];
-				wavSoundNext.seamlessPlay = false;
+				wavSound.wav = eventSounds[activeEvent][sampleNum];
+				wavSound.seamlessPlay = false;
+				xQueueSend(wavSoundQueue, &wavSound, portMAX_DELAY);
 				state = SOUNDPLAYER_CONTINUOUS_WAIT;
 				break;
 
@@ -938,7 +955,7 @@ void loop()
 				if(enableInput[activeEvent])
 				{
 					// Enable still active
-					if(NULL == wavSoundNext.wav)
+					if(0 == uxQueueMessagesWaiting(wavSoundQueue))
 					{
 						// Queue empty
 						if(eventConfig[activeEvent].shuffle)
@@ -950,7 +967,8 @@ void loop()
 				else
 				{
 					// Enable not active
-					wavSoundNext.wav = NULL;  // Remove anything queued so it doesn't play
+					xQueueReset(wavSoundQueue);  // Remove anything queued so it doesn't play
+
 					lastSampleNum = UINT32_MAX;
 					if(eventConfig[activeEvent].level)
 						state = SOUNDPLAYER_CONTINUOUS_MUTE;
@@ -980,14 +998,17 @@ void loop()
 				// Queue begin file if one exists
 				if(eventConfig[activeEvent].beginIndex >= 0)
 				{
-					wavSoundNext.wav = eventSounds[activeEvent][eventConfig[activeEvent].beginIndex];
-					wavSoundNext.seamlessPlay = true;
+					wavSound.wav = eventSounds[activeEvent][eventConfig[activeEvent].beginIndex];
+					wavSound.seamlessPlay = true;
+					xQueueSend(wavSoundQueue, &wavSound, portMAX_DELAY);
 				}
 				state = SOUNDPLAYER_BME_WAIT1;
 				break;
 			case SOUNDPLAYER_BME_WAIT1:
-				if(NULL == wavSoundNext.wav)
+				if(0 == uxQueueMessagesWaiting(wavSoundQueue))
+				{
 					state = SOUNDPLAYER_BME_MIDDLE;
+				}
 				break;
 			case SOUNDPLAYER_BME_MIDDLE:
 				// Queue middle file.
@@ -1026,12 +1047,13 @@ void loop()
 				}
 //				Serial.println(sampleNum);
 				
-				wavSoundNext.wav = eventSounds[activeEvent][sampleNum];
-				wavSoundNext.seamlessPlay = true;
+				wavSound.wav = eventSounds[activeEvent][sampleNum];
+				wavSound.seamlessPlay = true;
+				xQueueSend(wavSoundQueue, &wavSound, portMAX_DELAY);
 				state = SOUNDPLAYER_BME_WAIT2;
 				break;
 			case SOUNDPLAYER_BME_WAIT2:
-				if((enableInput[activeEvent]) && (NULL == wavSoundNext.wav))
+				if((enableInput[activeEvent]) && (0 == uxQueueMessagesWaiting(wavSoundQueue)))
 					state = SOUNDPLAYER_BME_MIDDLE;
 				else if(!enableInput[activeEvent])
 					state = SOUNDPLAYER_BME_END;
@@ -1040,14 +1062,15 @@ void loop()
 				// Queue end file if it exists.  It's OK if this overwrites a queued middle since we now want it to end.
 				if(eventConfig[activeEvent].endIndex >= 0)
 				{
-					wavSoundNext.wav = eventSounds[activeEvent][eventConfig[activeEvent].endIndex];
-					wavSoundNext.seamlessPlay = true;
+					wavSound.wav = eventSounds[activeEvent][eventConfig[activeEvent].endIndex];
+					wavSound.seamlessPlay = true;
+					xQueueSend(wavSoundQueue, &wavSound, portMAX_DELAY);
 				}
 				state = SOUNDPLAYER_BME_WAIT3;
 				break;
 			case SOUNDPLAYER_BME_WAIT3:
 				// Wait until the end is playing
-				if(NULL == wavSoundNext.wav)
+				if(0 == uxQueueMessagesWaiting(wavSoundQueue))
 				{
 					state = SOUNDPLAYER_WAIT_FOR_END;
 				}
