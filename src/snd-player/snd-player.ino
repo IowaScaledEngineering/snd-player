@@ -381,6 +381,7 @@ void loop()
 
 	uint8_t buttonsPressed = 0, oldButtonsPressed = 0;
 	unsigned long pressTime = 0;
+	uint32_t blinkCount = UINT32_MAX;  // Prevent blink on startup when at min/max volume
 	uint8_t inputStatus = 0;
 
 	unsigned long sdDetectTime = 0;
@@ -673,9 +674,19 @@ void loop()
 
 		// Turn off volume LED
 		uint16_t ledHoldTime = (VOL_STEP_NOM == volumeStep) ? 1000 : 100;
-		if((millis() - pressTime) > ledHoldTime)
+		if(millis() > pressTime + ledHoldTime)
 		{
 			gpio_set_level(LEDB, 0);
+		}
+
+		if( (0 == volumeStep) || (VOL_STEP_MAX == volumeStep) )
+		{
+			if((millis() > pressTime + 2*ledHoldTime) && (blinkCount < 2))
+			{
+				pressTime = millis();  // Trigger another blink
+				gpio_set_level(LEDB, 1);
+				blinkCount++;
+			}
 		}
 
 		// Find rising edge of volume up button
@@ -691,6 +702,7 @@ void loop()
 			Serial.print("Vol Up: ");
 			Serial.println(volumeStep);
 			gpio_set_level(LEDB, 1);
+			blinkCount = 0;
 		}
 
 		// Find rising edge of volume down button
@@ -706,6 +718,7 @@ void loop()
 			Serial.print("Vol Dn: ");
 			Serial.println(volumeStep);
 			gpio_set_level(LEDB, 1);
+			blinkCount = 0;
 		}
 
 		oldButtonsPressed = buttonsPressed;

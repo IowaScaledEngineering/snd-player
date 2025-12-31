@@ -242,7 +242,7 @@ static void audioPump(void *args)
 					sampleValue = wavSound->getNextSample();
 					if(millis() > timeoutTimer + 150)
 					{
-						// Getting the next sample took longer than 150ms (5760 bytes @ 44.1kHz = 130ms) so something is wrong
+						// Getting the next sample took longer than 150ms (5760 bytes @ 44.1kHz = 130ms) so something is wrong (mostly likely the card was removed)
 						// Delay task for 1s to allow main loop to clean up
 						vTaskDelay(1000 / portTICK_PERIOD_MS);
 					}
