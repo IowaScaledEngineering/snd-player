@@ -1,6 +1,6 @@
 #!/bin/bash
 
-firmware=bin/snd-player-0.3.0.bin
+firmware=bin/snd-player-0.3.1.bin
 
 if [ $# -eq 0 ]
   then
