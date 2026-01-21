@@ -445,7 +445,8 @@ void loop()
 	// Read NVM configuration
 	preferences.begin("soundplayer", false);
 	volumeStep = preferences.getUChar("volume", VOL_STEP_NOM);
-	
+	audioSetVolumeStep(volumeStep);
+
 	// Set defaults
 	silenceDecisecsMax = 0;
 	silenceDecisecsMin = 0;
