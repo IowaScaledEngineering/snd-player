@@ -1,6 +1,6 @@
 #!/bin/bash
 
-firmware=bin/snd-player-0.3.3.bin
+source ../../esptool.venv/bin/activate
 
 if [ $# -eq 0 ]
   then
@@ -11,11 +11,6 @@ fi
 
 while true
 do
-	success=1
-
-	echo
-
-	echo -n "Waiting for port"
 	touch $port > /dev/null 2> /dev/null
 	while [ $? -ne 0 ]
 	do
@@ -23,51 +18,14 @@ do
 		sleep 1
 		touch $port > /dev/null 2> /dev/null
 	done
-	
-	echo
-
-	echo "Performing 1200bps touch reset..."
-	stty -F /dev/ttyACM0 1200
-
-	echo -n "Waiting for port"
-	touch $port > /dev/null 2> /dev/null
-	while [ $? -ne 0 ]
-	do
-		echo -n .
-		sleep 1
-		touch $port > /dev/null 2> /dev/null
-	done
-
-	echo
 
 	echo -e "\n\033[1;33mProgramming\033[0m\n"
 	espeak "Programming"
 
-	echo Programming Try \#1...
-	esptool --chip esp32s2 --port $port write-flash 0x0 $firmware
+	make firmware BIN=build-1.0.0 PORT=$port
 
-	if [ $? -ne 0 ]
-	then
-	        echo Programming Try \#2...
-	        echo Wait...
-	        sleep 1
-		esptool --chip esp32s2 --port $port write-flash 0x0 $firmware
-		if [ $? -ne 0 ]
-		then
-			success=0
-		fi
-	fi
-
-	if (( $success == 1 ))
-	then
-		echo
-		echo -e "\033[0;32mComplete\033[0m\n"
-		espeak "Complete"
-	else
-		echo
-		echo -e "\033[0;31mFailed\033[0m\n"
-		espeak "Failed"
-	fi
+	echo -e "\033[0;32mComplete\033[0m\n"
+	espeak "Complete"
 
 	sleep 2
 
