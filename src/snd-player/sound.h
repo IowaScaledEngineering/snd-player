@@ -155,6 +155,7 @@ class SdSound : public Sound
 {
 	char *fileName;
 	size_t dataOffset;
+	uint16_t channels;
 	File wavFile;
 	uint8_t fileBuffer[FILE_BUFFER_SIZE];
 	size_t fileBufferLength;  // might be less than actual buffer size
@@ -162,11 +163,12 @@ class SdSound : public Sound
 	int16_t sampleValue;
 
 	public:
-		SdSound(const char *fname, size_t numBytes, size_t offset, uint32_t sr)
+		SdSound(const char *fname, size_t numBytes, size_t offset, uint32_t sr, uint16_t ch = 1)
 		{
 			fileName = strdup(fname);
 			dataOffset = offset;
 			dataSize = numBytes;
+			channels = ch;
 			configureSampleRate(sr);
 		}
 		~SdSound()
@@ -192,41 +194,68 @@ class SdSound : public Sound
 				return 0;
 		}
 	protected:
+		size_t sourceAvailable(void)
+		{
+			size_t frameBytes = 2 * channels;
+			if(dataSize >= byteCount + frameBytes)
+				return(dataSize - byteCount);
+			else
+				return 0;
+		}
 		bool getNextSourceSample(int16_t *sample)
 		{
 			size_t bytesToRead, bytesRead;
+			size_t frameBytes = 2 * channels;
+			size_t bufAvail = fileBufferAvailable();
 
-			if( (fileBufferAvailable() < 2) && sourceAvailable() )
+			if( (bufAvail < frameBytes) && (sourceAvailable() > bufAvail) )
 			{
-				// We're out of bytes (or had an odd number for some strange reason)
-				// and there's more of the file to grab, so grab it
-				if(sourceAvailable() < FILE_BUFFER_SIZE)
+				// We're out of bytes for a full frame and there's more of the file to grab
+				if((bufAvail > 0) && (fileBufferPosition > 0))
 				{
-					bytesToRead = sourceAvailable();
+					memmove(fileBuffer, fileBuffer + fileBufferPosition, bufAvail);
+				}
+				fileBufferLength = bufAvail;
+				fileBufferPosition = 0;
+
+				size_t remainingInFile = sourceAvailable() - bufAvail;
+				size_t space = FILE_BUFFER_SIZE - bufAvail;
+				bytesToRead = (remainingInFile < space) ? remainingInFile : space;
+
+				gpio_set_level(AUX5, 1);  ///////////////////////////////////////////////////////////////////////////////////////////
+				bytesRead = wavFile.read(fileBuffer + bufAvail, bytesToRead);
+				gpio_set_level(AUX5, 0);  ///////////////////////////////////////////////////////////////////////////////////////////
+				if(0 == bytesRead)
+				{
+					byteCount = dataSize;
 				}
 				else
 				{
-					bytesToRead = FILE_BUFFER_SIZE;
+					fileBufferLength = bufAvail + bytesRead;
 				}
-				gpio_set_level(AUX5, 1);  ///////////////////////////////////////////////////////////////////////////////////////////
-				bytesRead = wavFile.read(fileBuffer, bytesToRead);
-				gpio_set_level(AUX5, 0);  ///////////////////////////////////////////////////////////////////////////////////////////
-				fileBufferLength = bytesRead;
-				fileBufferPosition = 0;
 			}
 
-			if(fileBufferAvailable() >= 2)
+			if(fileBufferAvailable() >= frameBytes)
 			{
-				// We have at least 2 bytes in the local buffer
-				sampleValue = *((int16_t *)(fileBuffer+fileBufferPosition));
-				fileBufferPosition += 2;
-				byteCount += 2;
+				if(2 == channels)
+				{
+					int16_t left = *((int16_t *)(fileBuffer + fileBufferPosition));
+					int16_t right = *((int16_t *)(fileBuffer + fileBufferPosition + 2));
+					sampleValue = (int16_t)(((int32_t)left + (int32_t)right) / 2);
+				}
+				else
+				{
+					sampleValue = *((int16_t *)(fileBuffer + fileBufferPosition));
+				}
+				fileBufferPosition += frameBytes;
+				byteCount += frameBytes;
 				*sample = sampleValue;
 				return true;
 			}
 			else
 			{
 				// We got called even though there was nothing to send
+				byteCount = dataSize;
 				*sample = 0;
 				return false;
 			}

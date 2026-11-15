@@ -73,6 +73,7 @@ struct WavData {
 	uint32_t sampleRate;
 	uint32_t wavDataSize;
 	size_t dataStartPosition;
+	uint16_t channels;
 };
 
 
@@ -242,10 +243,11 @@ bool validateWavFile(File *wavFile, struct WavData *wavData)
 
 	wavFile->seek(wavFile->position() + 6);  // Seek to number of channels
 	wavFile->read((uint8_t*)&channels, 2);  // Read channels - WAV is little endian, only works if uC is also little endian
+	wavData->channels = channels;
 
-	if(channels > 1)
+	if((1 != channels) && (2 != channels))
 	{
-		Serial.print("! Not mono: ");
+		Serial.print("! Invalid channel count: ");
 		Serial.println(fileName);
 		return false;
 	}
@@ -512,7 +514,7 @@ void findWavFiles(File *rootDir, String dirName, std::vector<Sound *> *soundsVec
 
 					Serial.println("");
 
-					soundsVector->push_back(new SdSound(fullFileName.c_str(), wavData.wavDataSize, wavData.dataStartPosition, wavData.sampleRate));
+					soundsVector->push_back(new SdSound(fullFileName.c_str(), wavData.wavDataSize, wavData.dataStartPosition, wavData.sampleRate, wavData.channels));
 				}
 			}
 			else if(0 == strcasecmp(extension, ".mp3"))
