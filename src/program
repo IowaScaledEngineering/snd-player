@@ -22,7 +22,7 @@ do
 	echo -e "\n\033[1;33mProgramming\033[0m\n"
 	espeak "Programming"
 
-	make firmware BIN=build-1.0.0 PORT=$port
+	make flash BIN=releases/snd-player-1.0.0-549288.bin PORT=$port
 
 	echo -e "\033[0;32mComplete\033[0m\n"
 	espeak "Complete"
