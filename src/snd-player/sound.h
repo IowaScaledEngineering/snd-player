@@ -60,7 +60,7 @@ extern "C" {
 }
 
 #define FILE_BUFFER_SIZE     2048
-#define MP3_FILE_BUFFER_SIZE 2048
+#define MP3_FILE_BUFFER_SIZE 4096
 #define MP3_MAX_PCM_SAMPLES  (MAX_NGRAN * MAX_NSAMP * MAX_NCHAN)
 
 class Sound
@@ -497,7 +497,7 @@ class SdMp3Sound : public Sound
 			for(int ch = 0; ch < decInfo->nChans; ch++)
 			{
 				int prevBitOffset = bitOffset;
-				int nBytes = UnpackScaleFactors(decInfo, mainPtr, &bitOffset, decInfo->part23Length[gr][ch], gr, ch);
+				int nBytes = UnpackScaleFactors(decInfo, mainPtr, &bitOffset, availBits, gr, ch);
 				int sfBits = 8 * nBytes - prevBitOffset + bitOffset;
 				int huffBlockBits = decInfo->part23Length[gr][ch] - sfBits;
 				mainPtr += nBytes;
@@ -538,9 +538,16 @@ class SdMp3Sound : public Sound
 			fileBufferLength = avail;
 			fileBufferPosition = 0;
 
+			// Align the first read to a 512-byte SD sector boundary, then read 2048 bytes (4 sectors) at a time
+			size_t sectorOffset = (dataOffset + byteCount) & 511;
+			size_t targetRead = (0 != sectorOffset) ? (2560 - sectorOffset) : 2048;
 			size_t space = MP3_FILE_BUFFER_SIZE - fileBufferLength;
+			if(targetRead > space)
+			{
+				targetRead = space;
+			}
 			size_t remainingInFile = dataSize - byteCount;
-			size_t bytesToRead = (remainingInFile < space) ? remainingInFile : space;
+			size_t bytesToRead = (remainingInFile < targetRead) ? remainingInFile : targetRead;
 
 			gpio_set_level(AUX5, 1);  ///////////////////////////////////////////////////////////////////////////////////////////
 			size_t bytesRead = mp3File.read(fileBuffer + fileBufferLength, bytesToRead);
@@ -601,7 +608,9 @@ class SdMp3Sound : public Sound
 
 			uint8_t *inPtr = fileBuffer + fileBufferPosition;
 			int bytesLeft = (int)fileBufferAvailable();
+			gpio_set_level(AUX4, 1);  ///////////////////////////////////////////////////////////////////////////////////////////
 			int err = decodeFrame(mp3DecInfo, &inPtr, &bytesLeft, pcmBuffer);
+			gpio_set_level(AUX4, 0);  ///////////////////////////////////////////////////////////////////////////////////////////
 
 			if(ERR_MP3_NONE == err)
 			{
@@ -756,6 +765,12 @@ class SdMp3Sound : public Sound
 			if(0 == pcmSamplesAvailable())
 			{
 				decodeNextFrame();
+			}
+			else if(pcmPosition == (pcmLength >> 1))
+			{
+				// Refill file buffer midway through the decoded PCM frame so SD reads
+				// and MP3 frame decompression do not happen on the same sample period
+				refillFileBuffer();
 			}
 
 			if(pcmSamplesAvailable() > 0)
