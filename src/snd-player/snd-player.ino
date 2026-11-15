@@ -230,8 +230,6 @@ bool validateWavFile(File *wavFile, struct WavData *wavData)
 	const char *extension = &fileName[strlen(fileName)-4];
 	if(strcasecmp(extension, ".wav"))
 	{
-		Serial.print("	Ignoring: ");
-		Serial.println(fileName);
 		return false;  // Not a wav file (by extension anyway)
 	}
 	
@@ -287,6 +285,155 @@ bool validateWavFile(File *wavFile, struct WavData *wavData)
 	return true;
 }
 
+bool validateMp3File(File *mp3File, struct WavData *mp3Data)
+{
+	const char *fileName = mp3File->name();
+	size_t fileNameLength = strlen(fileName);
+	if(fileNameLength < 5)
+		return false;  // Filename too short (x.mp3 = min 5 chars)
+	const char *extension = &fileName[fileNameLength - 4];
+	if(strcasecmp(extension, ".mp3"))
+		return false;  // Not an mp3 file
+
+	size_t fileSize = mp3File->size();
+	if(fileSize < 16)
+	{
+		Serial.print("! Invalid MP3 file: ");
+		Serial.println(fileName);
+		return false;
+	}
+
+	// Skip any leading ID3v2 tags
+	size_t pos = 0;
+	uint8_t id3Header[10];
+	while(pos + 10 <= fileSize)
+	{
+		mp3File->seek(pos);
+		if(10 != mp3File->read(id3Header, 10))
+			break;
+		if(('I' == id3Header[0]) && ('D' == id3Header[1]) && ('3' == id3Header[2]) &&
+		   (0xFF != id3Header[3]) && (0xFF != id3Header[4]) &&
+		   (0 == ((id3Header[6] | id3Header[7] | id3Header[8] | id3Header[9]) & 0x80)))
+		{
+			uint32_t tagSize = ((uint32_t)(id3Header[6] & 0x7F) << 21) |
+			                   ((uint32_t)(id3Header[7] & 0x7F) << 14) |
+			                   ((uint32_t)(id3Header[8] & 0x7F) << 7) |
+			                   (uint32_t)(id3Header[9] & 0x7F);
+			pos += 10 + tagSize;
+			if(id3Header[5] & 0x10)
+				pos += 10;  // ID3v2 footer
+		}
+		else
+		{
+			break;
+		}
+	}
+
+	// Exclude trailing 128-byte ID3v1 tag if present
+	size_t endPos = fileSize;
+	if(endPos >= pos + 128)
+	{
+		uint8_t tag[3];
+		mp3File->seek(endPos - 128);
+		if((3 == mp3File->read(tag, 3)) && ('T' == tag[0]) && ('A' == tag[1]) && ('G' == tag[2]))
+		{
+			endPos -= 128;
+		}
+	}
+
+	// Search for the first valid MP3 Layer III frame
+	uint8_t scanBuf[512];
+	size_t scanLimit = pos + 16384;
+	if(scanLimit > endPos)
+		scanLimit = endPos;
+
+	size_t searchPos = pos;
+	while(searchPos + 4 <= scanLimit)
+	{
+		esp_task_wdt_reset();
+		mp3File->seek(searchPos);
+		size_t toRead = scanLimit - searchPos;
+		if(toRead > sizeof(scanBuf))
+			toRead = sizeof(scanBuf);
+		size_t bytesRead = mp3File->read(scanBuf, toRead);
+		if(bytesRead < 4)
+			break;
+
+		for(size_t i = 0; i + 4 <= bytesRead; i++)
+		{
+			uint32_t sr = 0, frameSize = 0, sideInfoSize = 0;
+			MPEGVersion ver = MPEG1;
+			if(SdMp3Sound::parseHeader(&scanBuf[i], &sr, &frameSize, &sideInfoSize, &ver))
+			{
+				size_t candidatePos = searchPos + i;
+				bool valid = false;
+
+				if(candidatePos + frameSize + 4 <= endPos)
+				{
+					uint8_t nextHdr[4];
+					uint32_t nextSr = 0, nextFrameSize = 0, nextSideInfo = 0;
+					MPEGVersion nextVer = MPEG1;
+					mp3File->seek(candidatePos + frameSize);
+					if((4 == mp3File->read(nextHdr, 4)) &&
+					   SdMp3Sound::parseHeader(nextHdr, &nextSr, &nextFrameSize, &nextSideInfo, &nextVer) &&
+					   (nextSr == sr) && (nextVer == ver))
+					{
+						valid = true;
+					}
+				}
+				else if(candidatePos + frameSize == endPos)
+				{
+					valid = true;
+				}
+
+				if(valid)
+				{
+					// Check if the first frame is a Xing / Info / VBRI metadata frame and skip it
+					if(candidatePos + frameSize < endPos)
+					{
+						uint8_t vbrBuf[64];
+						size_t checkLen = (frameSize < sizeof(vbrBuf)) ? frameSize : sizeof(vbrBuf);
+						mp3File->seek(candidatePos);
+						if(checkLen == mp3File->read(vbrBuf, checkLen))
+						{
+							size_t fhBytes = ((~vbrBuf[1]) & 0x01) ? 6 : 4;
+							size_t xingOffset = fhBytes + sideInfoSize;
+							bool isVbrHeader = false;
+							if((xingOffset + 4 <= checkLen) &&
+							   ((0 == memcmp(&vbrBuf[xingOffset], "Xing", 4)) ||
+							    (0 == memcmp(&vbrBuf[xingOffset], "Info", 4))))
+							{
+								isVbrHeader = true;
+							}
+							else if((40 <= checkLen) && (0 == memcmp(&vbrBuf[36], "VBRI", 4)))
+							{
+								isVbrHeader = true;
+							}
+							if(isVbrHeader)
+							{
+								candidatePos += frameSize;
+							}
+						}
+					}
+
+					mp3Data->sampleRate = sr;
+					mp3Data->dataStartPosition = candidatePos;
+					mp3Data->wavDataSize = endPos - candidatePos;
+					return true;
+				}
+			}
+		}
+
+		if(bytesRead < sizeof(scanBuf))
+			break;
+		searchPos += bytesRead - 3;
+	}
+
+	Serial.print("! Invalid MP3 file: ");
+	Serial.println(fileName);
+	return false;
+}
+
 void findWavFiles(File *rootDir, String dirName, std::vector<Sound *> *soundsVector, EventConfig *config)
 {
 	File wavFile;
@@ -308,6 +455,10 @@ void findWavFiles(File *rootDir, String dirName, std::vector<Sound *> *soundsVec
 		}
 		else
 		{
+			const char *fileName = wavFile.name();
+			size_t fileNameLength = strlen(fileName);
+			const char *extension = (fileNameLength >= 5) ? &fileName[fileNameLength - 4] : "";
+
 // One Shot Mode: No option file
 //
 // Beginning-Middle-End Mode: bme.opt
@@ -315,51 +466,92 @@ void findWavFiles(File *rootDir, String dirName, std::vector<Sound *> *soundsVec
 // Continuous Mode: continuous.opt
 //    Shuffle after each WAV: shuffle.opt
 //    Level sensitive (end immediately): level.opt
-			if(0 == strcmp(wavFile.name(), "bme.opt"))
+			if(0 == strcmp(fileName, "bme.opt"))
 			{
 				config->mode = MODE_BME;
 			}
-			else if(0 == strcmp(wavFile.name(), "continuous.opt"))
+			else if(0 == strcmp(fileName, "continuous.opt"))
 			{
 				config->mode = MODE_CONTINUOUS;
 			}
-			else if(0 == strcmp(wavFile.name(), "shuffle.opt"))
+			else if(0 == strcmp(fileName, "shuffle.opt"))
 			{
 				config->shuffle = true;
 			}
-			else if(0 == strcmp(wavFile.name(), "level.opt"))
+			else if(0 == strcmp(fileName, "level.opt"))
 			{
 				config->level = true;
 			}
-			else if(validateWavFile(&wavFile, &wavData))
+			else if(0 == strcasecmp(extension, ".wav"))
 			{
-				// If we got here, then it looks like a valid wav file
-				String fullFileName = dirName + wavFile.name();
-
-				Serial.print("+ Adding ");
-				Serial.print(fullFileName);
-				Serial.print(" (");
-				Serial.print(wavData.sampleRate);
-				Serial.print(",");
-				Serial.print(wavData.wavDataSize);
-				Serial.print(",");
-				Serial.print(wavData.dataStartPosition);
-				Serial.print(")");
-
-				if(!strcmp(wavFile.name(), "begin.wav"))
+				if(validateWavFile(&wavFile, &wavData))
 				{
-					config->beginIndex = soundsVector->size();   // Current size will be index of the newly pushed object below
-					Serial.print(" - BME BEGIN");
+					// If we got here, then it looks like a valid wav file
+					String fullFileName = dirName + fileName;
+
+					Serial.print("+ Adding ");
+					Serial.print(fullFileName);
+					Serial.print(" (");
+					Serial.print(wavData.sampleRate);
+					Serial.print(",");
+					Serial.print(wavData.wavDataSize);
+					Serial.print(",");
+					Serial.print(wavData.dataStartPosition);
+					Serial.print(")");
+
+					if(!strcasecmp(fileName, "begin.wav"))
+					{
+						config->beginIndex = soundsVector->size();   // Current size will be index of the newly pushed object below
+						Serial.print(" - BME BEGIN");
+					}
+					else if(!strcasecmp(fileName, "end.wav"))
+					{
+						config->endIndex = soundsVector->size();   // Current size will be index of the newly pushed object below
+						Serial.print(" - BME END");
+					}
+
+					Serial.println("");
+
+					soundsVector->push_back(new SdSound(fullFileName.c_str(), wavData.wavDataSize, wavData.dataStartPosition, wavData.sampleRate));
 				}
-				else if(!strcmp(wavFile.name(), "end.wav"))
+			}
+			else if(0 == strcasecmp(extension, ".mp3"))
+			{
+				if(validateMp3File(&wavFile, &wavData))
 				{
-					config->endIndex = soundsVector->size();   // Current size will be index of the newly pushed object below
-					Serial.print(" - BME END");
+					// If we got here, then it looks like a valid mp3 file
+					String fullFileName = dirName + fileName;
+
+					Serial.print("+ Adding ");
+					Serial.print(fullFileName);
+					Serial.print(" (");
+					Serial.print(wavData.sampleRate);
+					Serial.print(",");
+					Serial.print(wavData.wavDataSize);
+					Serial.print(",");
+					Serial.print(wavData.dataStartPosition);
+					Serial.print(")");
+
+					if(!strcasecmp(fileName, "begin.mp3"))
+					{
+						config->beginIndex = soundsVector->size();   // Current size will be index of the newly pushed object below
+						Serial.print(" - BME BEGIN");
+					}
+					else if(!strcasecmp(fileName, "end.mp3"))
+					{
+						config->endIndex = soundsVector->size();   // Current size will be index of the newly pushed object below
+						Serial.print(" - BME END");
+					}
+
+					Serial.println("");
+
+					soundsVector->push_back(new SdMp3Sound(fullFileName.c_str(), wavData.wavDataSize, wavData.dataStartPosition, wavData.sampleRate));
 				}
-
-				Serial.println("");
-
-				soundsVector->push_back(new SdSound(fullFileName.c_str(), wavData.wavDataSize, wavData.dataStartPosition, wavData.sampleRate));
+			}
+			else if(fileNameLength >= 5)
+			{
+				Serial.print("	Ignoring: ");
+				Serial.println(fileName);
 			}
 		}
 		wavFile.close();

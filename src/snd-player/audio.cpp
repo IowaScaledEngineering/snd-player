@@ -185,7 +185,7 @@ static void audioPump(void *args)
 	size_t bytesWritten;
 	i2s_std_clk_config_t clk_cfg;
 	uint32_t outputValue;
-	WavSound wavSound;
+	WavSound wavSound = {NULL, false};
 	uint32_t oldSampleRate = 0;
 	uint32_t flushCount = 0;
 	unsigned long timeoutTimer;
@@ -231,6 +231,11 @@ static void audioPump(void *args)
 				if(stopPlayer)
 				{
 					stopPlayer = false;
+					if(NULL != wavSound.wav)
+					{
+						wavSound.wav->close();
+						wavSound.wav = NULL;
+					}
 					playerState = PLAYER_FLUSH;
 				}
 				else if(wavSound.wav->available())
