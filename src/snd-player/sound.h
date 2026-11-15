@@ -36,22 +36,115 @@ class Sound
 	protected:
 		size_t dataSize;
 		size_t byteCount;
+		uint32_t sourceSampleRate;
 		uint32_t sampleRate;
+		uint8_t upsampleFactor;
+		uint8_t upsampleStep;
+		int16_t prevSample;
+		int16_t currSample;
+		bool hasCurrSample;
 
-	public:
-		virtual ~Sound()
+		void configureSampleRate(uint32_t sr)
 		{
+			sourceSampleRate = sr;
+			switch(sr)
+			{
+				case 11025:
+				case 12000:
+					upsampleFactor = 4;
+					break;
+				case 22050:
+				case 24000:
+					upsampleFactor = 2;
+					break;
+				default:
+					upsampleFactor = 1;
+					break;
+			}
+			sampleRate = sr * upsampleFactor;
+			resetUpsampler();
 		}
-		virtual void open(void);
-		virtual size_t available(void)
+
+		void resetUpsampler(void)
+		{
+			upsampleStep = upsampleFactor;
+			prevSample = 0;
+			currSample = 0;
+			hasCurrSample = false;
+		}
+
+		virtual size_t sourceAvailable(void)
 		{
 			if(dataSize > byteCount)
 				return(dataSize - byteCount);
 			else
 				return 0;
 		}
-		virtual int16_t getNextSample(void);
-		virtual void close(void);
+
+		virtual bool getNextSourceSample(int16_t *sample) = 0;
+
+	public:
+		static bool isValidSampleRate(uint32_t sr)
+		{
+			return((8000 == sr) || (11025 == sr) || (12000 == sr) ||
+			       (16000 == sr) || (22050 == sr) || (24000 == sr) ||
+			       (32000 == sr) || (44100 == sr) || (48000 == sr));
+		}
+
+		virtual ~Sound()
+		{
+		}
+		virtual void open(void) = 0;
+		virtual size_t available(void)
+		{
+			if(1 == upsampleFactor)
+				return sourceAvailable();
+			if((upsampleStep < upsampleFactor) || hasCurrSample)
+				return 1;
+			return sourceAvailable();
+		}
+		virtual int16_t getNextSample(void)
+		{
+			int16_t sample = 0;
+			if(1 == upsampleFactor)
+			{
+				getNextSourceSample(&sample);
+				return sample;
+			}
+
+			if(upsampleStep >= upsampleFactor)
+			{
+				if(!hasCurrSample)
+				{
+					if(!getNextSourceSample(&prevSample))
+						return 0;
+				}
+				else
+				{
+					prevSample = currSample;
+				}
+
+				if(getNextSourceSample(&currSample))
+				{
+					hasCurrSample = true;
+				}
+				else
+				{
+					currSample = prevSample;
+					hasCurrSample = false;
+				}
+				upsampleStep = 1;
+				return prevSample;
+			}
+			else
+			{
+				int32_t diff = (int32_t)currSample - (int32_t)prevSample;
+				sample = (int16_t)((int32_t)prevSample + (diff * (int32_t)upsampleStep) / (int32_t)upsampleFactor);
+				upsampleStep++;
+				return sample;
+			}
+		}
+		virtual void close(void) = 0;
 		uint32_t getSampleRate(void)
 		{
 			return sampleRate;
@@ -69,12 +162,12 @@ class SdSound : public Sound
 	int16_t sampleValue;
 
 	public:
-		SdSound(const char *fname, size_t numBytes, size_t offset, uint16_t sr)
+		SdSound(const char *fname, size_t numBytes, size_t offset, uint32_t sr)
 		{
 			fileName = strdup(fname);
 			dataOffset = offset;
 			dataSize = numBytes;
-			sampleRate = sr;
+			configureSampleRate(sr);
 		}
 		~SdSound()
 		{
@@ -89,6 +182,7 @@ class SdSound : public Sound
 			byteCount = 0;
 			fileBufferLength = 0;
 			fileBufferPosition = 0;
+			resetUpsampler();
 		}
 		size_t fileBufferAvailable(void)
 		{
@@ -97,17 +191,18 @@ class SdSound : public Sound
 			else
 				return 0;
 		}
-		int16_t getNextSample(void)
+	protected:
+		bool getNextSourceSample(int16_t *sample)
 		{
 			size_t bytesToRead, bytesRead;
 
-			if( (fileBufferAvailable() < 2) && available() )
+			if( (fileBufferAvailable() < 2) && sourceAvailable() )
 			{
 				// We're out of bytes (or had an odd number for some strange reason)
 				// and there's more of the file to grab, so grab it
-				if(available() < FILE_BUFFER_SIZE)
+				if(sourceAvailable() < FILE_BUFFER_SIZE)
 				{
-					bytesToRead = available();
+					bytesToRead = sourceAvailable();
 				}
 				else
 				{
@@ -126,14 +221,17 @@ class SdSound : public Sound
 				sampleValue = *((int16_t *)(fileBuffer+fileBufferPosition));
 				fileBufferPosition += 2;
 				byteCount += 2;
-				return sampleValue;
+				*sample = sampleValue;
+				return true;
 			}
 			else
 			{
 				// We got called even though there was nothing to send
-				return 0;
+				*sample = 0;
+				return false;
 			}
 		}
+	public:
 		void close(void)
 		{
 			wavFile.close();
@@ -270,7 +368,7 @@ class SdMp3Sound : public Sound
 		if(fhBytes < 0)
 			return ERR_MP3_INVALID_FRAMEHEADER;
 
-		if((uint32_t)decInfo->samprate != sampleRate)
+		if((uint32_t)decInfo->samprate != sourceSampleRate)
 			return ERR_MP3_INVALID_FRAMEHEADER;
 
 		int sideBytes = sideBytesTab[decInfo->version][(1 == decInfo->nChans) ? 0 : 1];
@@ -550,7 +648,6 @@ class SdMp3Sound : public Sound
 			fileName = strdup(fname);
 			dataOffset = offset;
 			dataSize = numBytes;
-			sampleRate = sr;
 			mp3DecInfo = NULL;
 			pcmBuffer = NULL;
 			pcmLength = 0;
@@ -558,6 +655,7 @@ class SdMp3Sound : public Sound
 			fileBufferLength = 0;
 			fileBufferPosition = 0;
 			byteCount = 0;
+			configureSampleRate(sr);
 		}
 		~SdMp3Sound()
 		{
@@ -576,10 +674,12 @@ class SdMp3Sound : public Sound
 			fileBufferPosition = 0;
 			pcmLength = 0;
 			pcmPosition = 0;
+			resetUpsampler();
 			mp3DecInfo = AllocateBuffers();
 			pcmBuffer = (int16_t *)malloc(MP3_MAX_PCM_SAMPLES * sizeof(int16_t));
 		}
-		size_t available(void)
+	protected:
+		size_t sourceAvailable(void)
 		{
 			size_t pcmAvailBytes = pcmSamplesAvailable() * 2;
 			size_t unreadFileBytes = (dataSize > byteCount) ? (dataSize - byteCount) : 0;
@@ -590,7 +690,7 @@ class SdMp3Sound : public Sound
 				return(inBufAvail + unreadFileBytes);
 			return 0;
 		}
-		int16_t getNextSample(void)
+		bool getNextSourceSample(int16_t *sample)
 		{
 			if(0 == pcmSamplesAvailable())
 			{
@@ -599,13 +699,16 @@ class SdMp3Sound : public Sound
 
 			if(pcmSamplesAvailable() > 0)
 			{
-				return pcmBuffer[pcmPosition++];
+				*sample = pcmBuffer[pcmPosition++];
+				return true;
 			}
 			else
 			{
-				return 0;
+				*sample = 0;
+				return false;
 			}
 		}
+	public:
 		void close(void)
 		{
 			if(mp3File)
@@ -636,12 +739,12 @@ class MemSound : public Sound
 	int16_t sampleValue;
 
 	public:
-		MemSound(uint8_t num, const uint8_t *sound, size_t numBytes, uint16_t sr)
+		MemSound(uint8_t num, const uint8_t *sound, size_t numBytes, uint32_t sr)
 		{
 			soundNum = num;
 			dataPtr = sound;
 			dataSize = numBytes;
-			sampleRate = sr;
+			configureSampleRate(sr);
 		}
 		~MemSound()
 		{
@@ -652,20 +755,25 @@ class MemSound : public Sound
 			Serial.print("Open: Internal ");
 			Serial.println(soundNum);
 			byteCount = 0;
+			resetUpsampler();
 		}
-		int16_t getNextSample(void)
+	protected:
+		bool getNextSourceSample(int16_t *sample)
 		{
-			if(available() >= 2)
+			if(sourceAvailable() >= 2)
 			{
 				sampleValue = *((int16_t *)(dataPtr+byteCount));
 				byteCount += 2;
-				return sampleValue;
+				*sample = sampleValue;
+				return true;
 			}
 			else
 			{
-				return 0;
+				*sample = 0;
+				return false;
 			}
 		}
+	public:
 		void close(void)
 		{
 			return;

@@ -253,7 +253,7 @@ bool validateWavFile(File *wavFile, struct WavData *wavData)
 	wavFile->read((uint8_t*)&sampleRate, 4);  // Read sample rate - WAV is little endian, only works if uC is also little endian
 	wavData->sampleRate = sampleRate;
 
-	if((8000 != sampleRate) && (16000 != sampleRate) && (32000 != sampleRate) && (44100 != sampleRate))
+	if(!Sound::isValidSampleRate(sampleRate))
 	{
 		Serial.print("! Incorrect sample rate: ");
 		Serial.println(fileName);
