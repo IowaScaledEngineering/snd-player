@@ -31,7 +31,7 @@ define ESP_TOUCH_RESET
 	@bash -c 'sleep 0.5; echo "Done!"'
 endef
 
-.PHONY: help compile compile-verbose upload upload-fresh release flash terminal clea
+.PHONY: help compile compile-verbose upload upload-fresh release flash terminal clean
 
 help:
 	@echo "make compile....... Build $(BASE_NAME)"
@@ -61,11 +61,11 @@ upload-fresh:
 	esptool --chip esp32s2 --port $(PORT) --baud 921600 --before default-reset --after hard-reset write-flash \
 		0x1000 $(BUILD_DIR)/$(BASE_NAME).ino.bootloader.bin \
 		0x8000 $(BUILD_DIR)/$(BASE_NAME).ino.partitions.bin \
-		0xe000 ~/.arduino15/packages/esp32/hardware/esp32/$(ARD_ESP32_VER)/tools/partitions/boot_app0.bin \
+		0xe000 $(BUILD_DIR)/boot_app0.bin \
 		0x10000 $(BUILD_DIR)/$(BASE_NAME).ino.bin
 
 release:
-	esptool --chip esp32s2 merge-bin -o releases/snd-player-$(REV)-$(GITREV).bin --flash-mode keep --flash-freq keep --flash-size keep --format hex 0x1000 $(BUILD_DIR)/snd-player.ino.bootloader.bin 0x8000 $(BUILD_DIR)/snd-player.ino.partitions.bin 0xe000 ~/.arduino15/packages/esp32/hardware/esp32/$(ARD_ESP32_VER)/tools/partitions/boot_app0.bin 0x10000 $(BUILD_DIR)/snd-player.ino.bin
+	esptool --chip esp32s2 merge-bin -o releases/$(BASE_NAME)-$(REV)-$(GITREV).bin --flash-mode keep --flash-freq keep --flash-size keep --format hex 0x1000 $(BUILD_DIR)/$(BASE_NAME).ino.bootloader.bin 0x8000 $(BUILD_DIR)/$(BASE_NAME).ino.partitions.bin 0xe000 $(BUILD_DIR)/boot_app0.bin 0x10000 $(BUILD_DIR)/$(BASE_NAME).ino.bin
 
 flash:
 	$(ESP_TOUCH_RESET)
