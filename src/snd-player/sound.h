@@ -19,6 +19,38 @@ LICENSE:
 
 *************************************************************************/
 
+/*
+                 Source Sample Rate (WAV / MP3) │                Upsample Factor                 │             Playback Sample Rate (I2S Output)
+  ────────────────────────────────────────────────┼────────────────────────────────────────────────┼───────────────────────────────────────────────
+                                         8,000 Hz │                   1 × (none)                   │                                      8,000 Hz
+                                        11,025 Hz │                      4 ×                       │                                     44,100 Hz
+                                        12,000 Hz │                      4 ×                       │                                     48,000 Hz
+                                        16,000 Hz │                   1 × (none)                   │                                     16,000 Hz
+                                        22,050 Hz │                      2 ×                       │                                     44,100 Hz
+                                        24,000 Hz │                      2 ×                       │                                     48,000 Hz
+                                        32,000 Hz │                   1 × (none)                   │                                     32,000 Hz
+                                        44,100 Hz │                   1 × (none)                   │                                     44,100 Hz
+                                        48,000 Hz │                   1 × (none)                   │                                     48,000 Hz
+
+  Any file with a sample rate not in the left column is rejected during validation.
+
+  It performs linear interpolation between consecutive source samples (prevSample and currSample) in Sound::getNextSample()
+  (src/snd-player/sound.h:100-139):
+
+                             (currSample - prevSample) × k
+    output[k] = prevSample + ─────────────────────────────,   k ∈ {0, …, upsampleFactor - 1}
+                                    upsampleFactor
+
+  For example, if two consecutive source samples are 100 and 500:
+
+  • 2 × upsampling outputs: 100, 300, 500
+  • 4 × upsampling outputs: 100, 200, 300, 400, 500
+
+  Only on the very last sample of the file (where there is no following sample to interpolate toward) does it hold the final sample value across
+  the remaining steps.
+
+*/
+
 #pragma once
 
 #include <SD.h>
