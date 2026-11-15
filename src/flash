@@ -1,0 +1,16 @@
+#!/bin/bash
+
+# no-reset-stub guarantees the port stays open
+
+echo Programming Try \#1...
+#esptool --chip esp32s2 --port $1 --before default-reset --after no-reset-stub write-flash -z --flash-mode dio --flash-freq 80m --flash-size 4MB 0x1000 $2/snd-player.ino.bootloader.bin 0x8000 $2/snd-player.ino.partitions.bin 0xe000 $2/boot_app0.bin 0x10000 $2/snd-player.ino.bin
+esptool --chip esp32s2 --port $1 --before default-reset --after no-reset-stub write-flash -z --flash-mode dio --flash-freq 80m --flash-size 4MB 0x0000 $2/snd-player.ino.merged.bin
+
+if [ $? -ne 0 ]
+then
+	echo Programming Try \#2...
+	echo Wait...
+	sleep 1
+#	esptool --chip esp32s2 --port $1 --before default-reset --after no-reset-stub write-flash -z --flash-mode dio --flash-freq 80m --flash-size 4MB 0x1000 $2/snd-player.ino.bootloader.bin 0x8000 $2/snd-player.ino.partitions.bin 0xe000 $2/boot_app0.bin 0x10000 $2/snd-player.ino.bin
+	esptool --chip esp32s2 --port $1 --before default-reset --after no-reset-stub write-flash -z --flash-mode dio --flash-freq 80m --flash-size 4MB 0x0000 $2/snd-player.ino.merged.bin
+fi
